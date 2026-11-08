@@ -1,0 +1,21 @@
+====================================================================
+🧭 PUSULA — SÜRDÜRÜLEBİLİR HAYAT & HEDEF PLANLAYICI (WINDOWS SÜRÜMÜ)
+====================================================================
+
+NASIL KULLANILIR?
+
+1. Önce bu ZIP dosyasını sağ tıklayıp "Tümünü Ayıkla (Klasöre Çıkar)" diyerek
+   bilgisayarınızda istediğiniz bir yere (örneğin Masaüstü veya Belgelerim) çıkarın.
+
+2. Klasörün içindeki:
+   👉 "Masaustune_Kisayol_Olustur_Windows.bat" dosyasına bir kez çift tıklayın.
+   Masaüstünüzde "Pusula Planlayıcı" adında özel ikonlu uygulama kısayolu oluşacaktır!
+
+3. Uygulamayı açmak için:
+   👉 Masaüstündeki "Pusula Planlayıcı" kısayoluna VEYA
+   👉 Klasördeki "Pusula_Baslat_Windows.bat" dosyasına çift tıklamanız yeterlidir.
+
+   Uygulama bağımsız bir masaüstü penceresi olarak açılır (herhangi bir ek kurulum gerektirmez).
+   Verileriniz otomatik olarak bilgisayarınızda saklanır; ayrıca sol alttaki "💾 Yedekle"
+   butonuyla istediğiniz zaman yedek alabilirsiniz.
+====================================================================

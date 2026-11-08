@@ -1,0 +1,1376 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pusulapp — Sürdürülebilir Hayat & Hedef Planlayıcı</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+  <script src="theme-picker.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <!-- SOL YAN MENÜ (SIDEBAR) -->
+    <aside class="sidebar">
+      <div class="brand-box">
+        <img src="pusulapp_logo.png" alt="Pusulapp Logo" class="brand-logo-img" />
+        <div>
+          <h1 class="brand-title">Pusulapp</h1>
+          <p class="brand-subtitle">Sürdürülebilir Yaşam Sistemi</p>
+        </div>
+      </div>
+
+      <!-- Hızlı Görev & Hedef Ekle Butonları -->
+      <div class="sidebar-quick-actions">
+        <button class="btn btn-primary btn-full" id="btnQuickTask">
+          <span>＋</span> Yeni Görev Ekle
+        </button>
+        <button class="btn btn-secondary btn-full" id="btnQuickGoal">
+          <span>🎯</span> Yeni Hedef Tanımla
+        </button>
+      </div>
+
+      <!-- Gezinme Menüsü -->
+      <nav class="nav-menu">
+        <div class="nav-section-label">PLANLAMA & AKIŞ</div>
+        <button class="nav-item active" data-view="daily">
+          <span class="nav-icon">☀️</span>
+          <span class="nav-text">Günün Odağı</span>
+          <span class="nav-badge" id="badgeTodayCount">0</span>
+        </button>
+        <button class="nav-item" data-view="weekly">
+          <span class="nav-icon">📅</span>
+          <span class="nav-text">Haftalık Plan</span>
+          <span class="nav-badge" id="badgeWeekCount">0</span>
+        </button>
+        <button class="nav-item" data-view="calendar">
+          <span class="nav-icon">🗓️</span>
+          <span class="nav-text">Takvim (Gün / Ay / Yıl)</span>
+          <span class="nav-badge" id="badgeCalendarMonthCount">0</span>
+        </button>
+        <button class="nav-item" data-view="timer">
+          <span class="nav-icon">⏱️</span>
+          <span class="nav-text">Odak & Zamanlayıcı</span>
+          <span class="nav-badge" id="badgeTimerState">Hazır</span>
+        </button>
+
+        <div class="nav-section-label">VİZYON & SÜREKLİLİK</div>
+        <button class="nav-item" data-view="goals">
+          <span class="nav-icon">🎯</span>
+          <span class="nav-text">Hedef Pusulası</span>
+          <span class="nav-badge" id="badgeGoalsCount">0</span>
+        </button>
+        <button class="nav-item" data-view="routines">
+          <span class="nav-icon">🔁</span>
+          <span class="nav-text">Tekrarlayan Rutinler</span>
+          <span class="nav-badge" id="badgeRoutinesCount">0</span>
+        </button>
+        <button class="nav-item" data-view="notes">
+          <span class="nav-icon">📓</span>
+          <span class="nav-text">Notlarım</span>
+          <span class="nav-badge" id="badgeNotesNavCount">0</span>
+        </button>
+        <button class="nav-item" data-view="insights">
+          <span class="nav-icon">⏳</span>
+          <span class="nav-text">Erteleme Analizi</span>
+          <span class="nav-badge nav-badge-warn" id="badgePostponedCount">0</span>
+        </button>
+        <button class="nav-item" data-view="trash">
+          <span class="nav-icon">🗑️</span>
+          <span class="nav-text">Çöp Kutusu & Arşiv</span>
+          <span class="nav-badge" id="badgeTrashNavCount">0</span>
+        </button>
+      </nav>
+
+      <!-- Sürdürülebilirlik Ayarı: Otomatik Devretme -->
+      <div class="sidebar-card">
+        <div class="sidebar-card-header">
+          <span class="sidebar-card-title">🔄 Otomatik Devretme</span>
+          <label class="switch">
+            <input type="checkbox" id="toggleAutoRollover" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <p class="sidebar-card-desc">
+          Açık olduğunda, geçmiş günlerde bitmeyen görevleri otomatik olarak bugüne taşır.
+        </p>
+      </div>
+
+      <!-- Alt Panel: Veri Durumu, Yedekleme, Tema, Çöp Kutusu ve Verileri Sıfırlama -->
+      <div class="sidebar-footer">
+        <div class="sync-status" id="syncStatusIndicator">
+          <span class="status-dot online"></span>
+          <span id="syncStatusText">Veriler Cihazda Güvende</span>
+        </div>
+        <div class="footer-actions">
+          <button class="btn-icon-text" id="btnThemeToggle" title="Açık / Koyu Tema Değiştir">
+            <span id="themeIcon">🌙</span> Tema
+          </button>
+          <button class="btn-icon-text" id="btnExportData" title="Verileri JSON Olarak İndir">
+            💾 Yedekle
+          </button>
+          <label class="btn-icon-text" title="Yedek Dosyası Yükle">
+            📂 Yükle
+            <input type="file" id="inputImportData" accept=".json" hidden />
+          </label>
+        </div>
+        <div class="footer-actions footer-actions-bottom">
+          <button class="btn-icon-text btn-footer-trash" id="btnFooterTrash" title="Silinen Görev, Rutin ve Hedefleri Gör / Geri Yükle">
+            🗑️ Çöp Kutusu <span class="footer-mini-badge" id="badgeFooterTrashCount">0</span>
+          </button>
+          <button class="btn-icon-text btn-footer-reset" id="btnFooterReset" title="Tüm Verileri Sıfırla / Tertemiz Başlangıç Yap">
+            🧹 Verileri Sıfırla
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ANA İÇERİK ALANI -->
+    <main class="main-content">
+      <!-- ÜST BAR: Tarih Özeti, Canlı Saat, Arama ve Hızlı İstatistikler -->
+      <header class="top-header">
+        <div class="header-left">
+          <div class="header-title-row">
+            <button class="btn btn-ghost btn-xs" id="btnToggleFocusPage" title="Sol menüyü gizle / sadece aktif sayfayı tam ekran gör">
+              🔲 Sadece Bu Sayfa
+            </button>
+            <button class="btn btn-ghost btn-xs" id="btnRefreshApp" title="Sayfayı ve verileri yenile (Zamanlayıcı akışı korunur)">
+              🔄 Yenile
+            </button>
+            <span class="live-clock-pill" id="liveClockBadge" title="Gerçek zamanla canlı eşzamanlı">
+              🟢 <span id="liveClockText">--:--:--</span>
+            </span>
+          </div>
+          <h2 id="viewTitle" class="page-title">Günün Odağı</h2>
+          <p id="viewSubtitle" class="page-subtitle">Saat baskısı olmadan, adım adım sürdürülebilir ilerleme.</p>
+        </div>
+
+        <div class="header-right">
+          <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="globalSearchInput" placeholder="Görev, hedef veya notlarda ara..." />
+          </div>
+
+          <div class="header-stats">
+            <div class="mini-stat" title="Bugünkü tamamlanma oranı">
+              <span class="mini-stat-label">Bugün</span>
+              <strong class="mini-stat-val" id="statTodayRatio">0/0</strong>
+            </div>
+            <div class="mini-stat" title="Bu haftaki tamamlanma oranı">
+              <span class="mini-stat-label">Bu Hafta</span>
+              <strong class="mini-stat-val" id="statWeekRatio">0%</strong>
+            </div>
+            <div class="mini-stat" title="Aktif Hedef İlerlemesi">
+              <span class="mini-stat-label">Hedefler</span>
+              <strong class="mini-stat-val" id="statGoalsAvg">0%</strong>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- =========================================================
+           1. GÖRÜNÜM: GÜNÜN ODAĞI (GÜNLÜK PLAN)
+           ========================================================= -->
+      <section class="view-section active" id="view-daily">
+        <!-- GÜNÜN SÖZÜ (GERÇEK TARİHİ / EDEBİ ALINTI KARTI — GÜNDE TEK SÖZ, DEĞİŞTİRME YOK) -->
+        <div class="quote-banner-card" id="quoteOfTheDayCard">
+          <div class="quote-top-row">
+            <div class="quote-left">
+              <div class="quote-badge-row">
+                <span class="quote-tag" id="quoteDayOfYearBadge">📜 GÜNÜN SÖZÜ • GERÇEK ALINTI</span>
+                <span class="quote-date-label" id="quoteDateLabel"></span>
+              </div>
+              <blockquote class="quote-text" id="quoteTextDisplay">
+                "Yükleniyor..."
+              </blockquote>
+              <div class="quote-meta">
+                <strong id="quoteAuthorDisplay"></strong>
+                <span id="quoteSourceDisplay" class="quote-source"></span>
+              </div>
+            </div>
+            <div class="quote-actions">
+              <button class="btn btn-primary btn-xs" id="btnSaveQuoteToNotes" title="Bu sözü hem Kaydedilen Sözlerim'e hem de sağdaki Günün Notu kutusuna kaydet">
+                ⭐ Nota & Koleksiyona Kaydet
+              </button>
+              <button class="btn btn-secondary btn-xs" id="btnToggleSavedQuotes" title="Kaydettiğin tüm sözleri gör">
+                🔖 Kaydedilen Sözlerim (<span id="savedQuotesCountBadge">0</span>)
+              </button>
+            </div>
+          </div>
+
+          <!-- Kaydedilen Sözlerim Çekmecesi -->
+          <div id="savedQuotesDrawer" class="saved-quotes-drawer hidden">
+            <div class="saved-quotes-header">
+              <span>🔖 <strong>Kaydedilen Sözlerim Koleksiyonu</strong> (Ayrıca sağdaki <em>📓 Günün Notu</em> kutusuna ve <em>⏳ Not Arşivi</em> sayfasına da eklenir)</span>
+            </div>
+            <div id="savedQuotesList" class="saved-quotes-list"></div>
+          </div>
+        </div>
+
+        <!-- Gün Seçici ve Haftalık Mini Şerit -->
+        <div class="day-navigator-card">
+          <div class="day-nav-controls">
+            <button class="btn btn-ghost btn-sm" id="btnPrevDay">← Önceki Gün</button>
+            <div class="selected-day-display">
+              <span class="selected-day-badge" id="selectedDayBadge">BUGÜN</span>
+              <h3 id="selectedDayTitle">1 Kasım 2026, Pazar</h3>
+            </div>
+            <div class="day-nav-right">
+              <button class="btn btn-ghost btn-sm" id="btnGoToday">Bugüne Dön</button>
+              <button class="btn btn-ghost btn-sm" id="btnNextDay">Sonraki Gün →</button>
+            </div>
+          </div>
+
+          <!-- Haftanın 7 Günü Hızlı Geçiş Şeridi -->
+          <div class="week-strip" id="dailyWeekStrip"></div>
+        </div>
+
+        <!-- Geçmişten Kalan (Geciken) Görevler Uyarısı -->
+        <div class="overdue-banner hidden" id="overdueBanner">
+          <div class="overdue-info">
+            <span class="overdue-icon">⚠️</span>
+            <div>
+              <strong id="overdueTitle">Geçmiş günlerden kalan 2 tamamlanmamış görev var</strong>
+              <p>Suçluluk duymadan bugüne devredebilir veya ileri bir tarihe erteleyebilirsin.</p>
+            </div>
+          </div>
+          <div class="overdue-actions">
+            <button class="btn btn-warning btn-sm" id="btnRolloverAll">Hepsini Bugüne Devret</button>
+            <button class="btn btn-ghost btn-sm" id="btnToggleOverdueList">Listeyi Gör</button>
+          </div>
+        </div>
+        <div class="overdue-list-container hidden" id="overdueListContainer"></div>
+
+        <!-- Hızlı Görev Ekleme Çubuğu (Seçili Güne veya Bu Haftaya) -->
+        <form class="quick-add-bar" id="formInlineDailyAdd">
+          <input
+            type="text"
+            id="inputInlineTaskTitle"
+            placeholder="Seçili güne yeni bir görev ekle... (Örn: 30 sayfa kitap oku, Proje raporunu tamamla)"
+            required
+          />
+          <select id="selectInlineTaskGoal" title="Bir hedefe bağla">
+            <option value="">🎯 Hedef Bağlantısı Yok</option>
+          </select>
+          <select id="selectInlineTaskScope" title="Günlük mü Haftalık Esnek mi?">
+            <option value="day">📌 Seçili Güne</option>
+            <option value="week">📅 Bu Haftanın Havuzuna</option>
+          </select>
+          <select id="selectInlineTaskPriority" title="Öncelik">
+            <option value="normal">🔵 Normal</option>
+            <option value="high">🔴 Önemli / Öncelikli</option>
+            <option value="postponed">⏳ Ertelenmiş</option>
+            <option value="low">🟢 Düşük / Esnek</option>
+          </select>
+          <button type="submit" class="btn btn-primary">Ekle</button>
+        </form>
+
+        <!-- Günlük İçerik Izgarası -->
+        <div class="daily-grid">
+          <!-- Sol Sütun: Seçili Günün Görevleri & Rutinleri -->
+          <div class="daily-main-col">
+            <!-- Tekrarlayan Rutinler (O güne ait) -->
+            <div class="panel-card" id="dailyRoutinesPanel">
+              <div class="panel-header">
+                <div>
+                  <h4 class="panel-title">🔁 Günün Tekrarlayan Görevleri (Rutinler)</h4>
+                  <p class="panel-subtitle">Süreklilik sağlayan günlük/haftalık alışkanlıkların</p>
+                </div>
+                <button class="btn btn-ghost btn-xs" data-open-view="routines">Rutinleri Yönet →</button>
+              </div>
+              <div id="dailyRoutinesList" class="task-list"></div>
+            </div>
+
+            <!-- Seçili Günün Görevleri -->
+            <div class="panel-card">
+              <div class="panel-header">
+                <div>
+                  <h4 class="panel-title">✅ Günün Görevleri</h4>
+                  <p class="panel-subtitle" id="dailyTasksSubtitle">Saat kısıtlaması olmadan bugün odaklanacağın işler</p>
+                </div>
+                <div class="filter-pills">
+                  <button class="pill active" data-daily-filter="all">Tümü</button>
+                  <button class="pill" data-daily-filter="pending">Bekleyen</button>
+                  <button class="pill" data-daily-filter="postponed">⏳ Ertelenenler</button>
+                  <button class="pill" data-daily-filter="done">Tamamlanan</button>
+                </div>
+              </div>
+              <div id="dailyTasksList" class="task-list"></div>
+
+              <!-- Ertelenen Görevler Özel Bölümü -->
+              <div id="dailyPostponedSection" class="postponed-tasks-section hidden">
+                <div class="postponed-section-header">
+                  <div class="postponed-section-title">
+                    <span class="postponed-icon">⏳</span>
+                    <strong>Ertelenmiş Görevler</strong>
+                    <span class="postponed-count-badge" id="dailyPostponedCount">0</span>
+                  </div>
+                  <span class="postponed-section-hint">Bu güne ertelenen görevler</span>
+                </div>
+                <div id="dailyPostponedTasksList" class="task-list"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sağ Sütun: Bu Haftanın Esnek Görevleri + Günlük Yansıma Notu + Aktif Hedef Özeti -->
+          <div class="daily-side-col">
+            <!-- Bu Haftanın Esnek Görevleri -->
+            <div class="panel-card">
+              <div class="panel-header">
+                <div>
+                  <h4 class="panel-title">🧺 Bu Haftanın Esnek Görevleri</h4>
+                  <p class="panel-subtitle">Belirli bir günü olmayan, bu hafta içinde yapılacaklar</p>
+                </div>
+                <button class="btn btn-ghost btn-xs" id="btnAddWeeklyFlexTask">＋ Haftalık Ekle</button>
+              </div>
+              <div id="dailyWeeklyPoolList" class="task-list compact-list"></div>
+            </div>
+
+            <!-- Günün Notu / Günlük Yansıma -->
+            <div class="panel-card note-card">
+              <div class="panel-header">
+                <div>
+                  <h4 class="panel-title">📓 Günün Notu & Yansıma</h4>
+                  <p class="panel-subtitle" id="dailyNoteDateLabel">Bugüne özel serbest notların</p>
+                </div>
+                <span class="save-badge" id="dailyNoteSavedBadge">Kaydedildi</span>
+              </div>
+              <textarea
+                id="textareaDailyNote"
+                class="daily-note-textarea"
+                placeholder="Bugün nasıl geçiyor? Aklına takılanlar, öğrendiklerin, yarın için notların..."
+              ></textarea>
+            </div>
+
+            <!-- Yaklaşan Kısa Vadeli Hedefler Özeti -->
+            <div class="panel-card">
+              <div class="panel-header">
+                <div>
+                  <h4 class="panel-title">🎯 Odaktaki Hedefler</h4>
+                  <p class="panel-subtitle">Vadesi yaklaşan kısa ve uzun vadeli hedeflerin</p>
+                </div>
+                <button class="btn btn-ghost btn-xs" data-open-view="goals">Tümünü Gör →</button>
+              </div>
+              <div id="dailyGoalsPreview" class="goals-mini-list"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =========================================================
+           2. GÖRÜNÜM: HAFTALIK PLAN (7 GÜN + HAFTALIK HAVUZ)
+           ========================================================= -->
+      <section class="view-section" id="view-weekly">
+        <div class="week-navigator-card">
+          <button class="btn btn-ghost btn-sm" id="btnPrevWeek">← Önceki Hafta</button>
+          <div class="week-title-box">
+            <span class="selected-day-badge" id="weekNumberBadge">44. HAFTA</span>
+            <h3 id="weekRangeTitle">26 Ekim – 1 Kasım 2026</h3>
+          </div>
+          <div class="day-nav-right">
+            <button class="btn btn-ghost btn-sm" id="btnGoThisWeek">Bu Haftaya Dön</button>
+            <button class="btn btn-ghost btn-sm" id="btnNextWeek">Sonraki Hafta →</button>
+          </div>
+        </div>
+
+        <!-- Haftalık Üst Özet: Haftalık Esnek Görev Havuzu & Haftanın Odak Notu -->
+        <div class="weekly-top-grid">
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <h4 class="panel-title">🧺 Haftalık Esnek Görev Havuzu (Gün Bağımsız)</h4>
+                <p class="panel-subtitle">Hangi gün yapacağın kesin olmayan ama bu hafta bitirmek istediğin görevler. İstediğin zaman bir güne atayabilirsin.</p>
+              </div>
+              <button class="btn btn-primary btn-sm" id="btnAddPoolTaskWeekView">＋ Havuza Görev Ekle</button>
+            </div>
+            <div id="weeklyPoolContainer" class="task-list"></div>
+          </div>
+
+          <div class="panel-card note-card">
+            <div class="panel-header">
+              <div>
+                <h4 class="panel-title">🧭 Haftanın Odağı & Haftalık Not</h4>
+                <p class="panel-subtitle">Bu haftanın ana önceliği ve haftalık değerlendirme</p>
+              </div>
+              <span class="save-badge" id="weeklyNoteSavedBadge">Kaydedildi</span>
+            </div>
+            <textarea
+              id="textareaWeeklyNote"
+              class="daily-note-textarea"
+              placeholder="Bu hafta en önemli 1-3 önceliğim nedir? Hafta sonunda kendimi nasıl hissetmek istiyorum?"
+            ></textarea>
+          </div>
+        </div>
+
+        <!-- Haftanın 7 Günü Panoramik Izgara -->
+        <div class="weekly-days-grid" id="weeklyDaysGrid"></div>
+      </section>
+
+      <!-- =========================================================
+           2.5 GÖRÜNÜM: TAKVİM (GÜN / AY / YIL GÖRÜNÜMLERİ)
+           ========================================================= -->
+      <section class="view-section" id="view-calendar">
+        <!-- Takvim Üst Kontrol Çubuğu -->
+        <div class="calendar-toolbar-card">
+          <div class="calendar-mode-switcher">
+            <button class="pill" data-cal-mode="day">📆 Günlük Takvim</button>
+            <button class="pill active" data-cal-mode="month">🗓️ Aylık Takvim</button>
+            <button class="pill" data-cal-mode="year">🌍 Yıllık Takvim (12 Ay)</button>
+          </div>
+
+          <div class="calendar-nav-center">
+            <button class="btn btn-ghost btn-sm" id="btnCalPrev">← Önceki</button>
+            <div class="calendar-current-title-wrap">
+              <span class="selected-day-badge" id="calPeriodBadge">AYLIK GÖRÜNÜM</span>
+              <h3 id="calCurrentTitle">Kasım 2026</h3>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="btnCalNext">Sonraki →</button>
+          </div>
+
+          <div class="calendar-nav-right">
+            <button class="btn btn-secondary btn-sm" id="btnCalGoToday">Bugüne Git</button>
+            <button class="btn btn-primary btn-sm" id="btnCalQuickAddTask">＋ Seçili Güne Görev</button>
+          </div>
+        </div>
+
+        <!-- Renk & Sembol Açıklama Şeridi (Legend) -->
+        <div class="calendar-legend-bar">
+          <span class="legend-item"><span class="legend-dot dot-pending"></span> Bekleyen Görev</span>
+          <span class="legend-item"><span class="legend-dot dot-done"></span> Tamamlanan Görev</span>
+          <span class="legend-item"><span class="legend-dot dot-postponed"></span> Ertelenmiş Görev</span>
+          <span class="legend-item"><span class="legend-dot dot-goal"></span> 🎯 Hedef Vade (Bitiş) Günü</span>
+          <span class="legend-item"><span class="legend-dot dot-note"></span> 📓 Günlük Notu Var</span>
+        </div>
+
+        <!-- MOD 1: GÜNLÜK TAKVİM (SOLDA MİNİ AY TAKVİMİ + SAĞDA DETAYLI GÜN AJANDASI) -->
+        <div id="calModeDayContainer" class="cal-day-mode-layout hidden">
+          <div class="cal-day-left-col">
+            <div class="panel-card">
+              <div class="panel-header">
+                <h4 class="panel-title" id="calMiniMonthTitle">Kasım 2026</h4>
+              </div>
+              <div id="calDayMiniMonthGrid" class="mini-month-grid"></div>
+            </div>
+
+            <div class="panel-card">
+              <div class="panel-header">
+                <div>
+                  <h4 class="panel-title">🎯 Bu Tarihte Aktif Hedefler & Vadeler</h4>
+                  <p class="panel-subtitle">Seçili günde devam eden veya vadesi dolan hedeflerin</p>
+                </div>
+              </div>
+              <div id="calDayGoalsBox" class="task-list"></div>
+            </div>
+          </div>
+
+          <div class="cal-day-right-col">
+            <div class="panel-card">
+              <div class="panel-header">
+                <div>
+                  <h4 class="panel-title" id="calDayDetailHeader">1 Kasım 2026, Pazar</h4>
+                  <p class="panel-subtitle" id="calDayDetailSub">Seçili günün görevleri, tekrarlayan rutinleri ve notları</p>
+                </div>
+              </div>
+
+              <form class="day-col-quick-add" id="formCalDayQuickAdd" style="margin-bottom:14px;">
+                <input type="text" id="inputCalDayQuickAdd" placeholder="+ Bu güne yeni görev ekle..." required />
+                <button type="submit" class="btn btn-primary btn-sm">Ekle</button>
+              </form>
+
+              <div id="calDayTasksAndRoutines" class="task-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MOD 2: AYLIK TAKVİM (SOLDA TAM AY IZGARASI + SAĞDA SEÇİLİ GÜN DETAY PANELİ) -->
+        <div id="calModeMonthContainer" class="cal-month-mode-layout">
+          <div class="cal-month-grid-card panel-card">
+            <div class="cal-weekdays-header">
+              <div>Pazartesi</div>
+              <div>Salı</div>
+              <div>Çarşamba</div>
+              <div>Perşembe</div>
+              <div>Cuma</div>
+              <div>Cumartesi</div>
+              <div>Pazar</div>
+            </div>
+            <div id="calMonthCellsGrid" class="cal-month-cells-grid"></div>
+          </div>
+
+          <!-- Seçili Gün İnceleme Paneli (Inspector) -->
+          <div class="cal-inspector-card panel-card">
+            <div class="panel-header">
+              <div>
+                <span class="selected-day-badge" id="calInspectorBadge">SEÇİLİ GÜN</span>
+                <h4 class="panel-title" id="calInspectorDateTitle" style="margin-top:4px;">1 Kasım 2026</h4>
+              </div>
+              <button class="btn btn-ghost btn-xs" id="btnInspectorOpenDaily">Günün Odağında Aç →</button>
+            </div>
+
+            <form class="day-col-quick-add" id="formCalInspectorAdd" style="margin-bottom:12px;">
+              <input type="text" id="inputCalInspectorAdd" placeholder="+ Seçili güne hızlı görev ekle..." required />
+              <button type="submit" class="btn btn-primary btn-xs">Ekle</button>
+            </form>
+
+            <div id="calInspectorContent" class="task-list"></div>
+          </div>
+        </div>
+
+        <!-- MOD 3: YILLIK TAKVİM (12 AYLIK PANORAMA + YILLIK HEDEF YOL HARİTASI) -->
+        <div id="calModeYearContainer" class="cal-year-mode-layout hidden">
+          <!-- Yıllık İstatistikler -->
+          <div class="goals-summary-strip" id="calYearSummaryStrip"></div>
+
+          <!-- Yıllık Hedef Vade Yol Haritası (12 Ay Boyunca Kısa & Uzun Vadeli Hedefler) -->
+          <div class="panel-card" style="margin-bottom:20px;">
+            <div class="panel-header">
+              <div>
+                <h4 class="panel-title">🗺️ Yıllık Hedef & Vade Yol Haritası</h4>
+                <p class="panel-subtitle">Kısa ve uzun vadeli hedeflerinin yılın hangi aylarını kapsadığını ve bitiş aylarını gör</p>
+              </div>
+            </div>
+            <div id="calYearGoalsRoadmap" class="year-roadmap-container"></div>
+          </div>
+
+          <!-- 12 Ay Mini Takvim Izgarası -->
+          <div id="calYear12MonthsGrid" class="cal-year-12-grid"></div>
+        </div>
+      </section>
+
+      <!-- =========================================================
+           3. GÖRÜNÜM: HEDEF PUSULASI (KISA & UZUN VADELİ HEDEFLER)
+           ========================================================= -->
+      <section class="view-section" id="view-goals">
+        <div class="goals-toolbar">
+          <div class="filter-pills">
+            <button class="pill active" data-goal-filter="all">Tüm Hedefler</button>
+            <button class="pill" data-goal-filter="short">⚡ Kısa Vadeli Hedefler</button>
+            <button class="pill" data-goal-filter="long">🏔️ Uzun Vadeli Hedefler</button>
+            <button class="pill" data-goal-filter="completed">🏆 Tamamlananlar</button>
+          </div>
+          <button class="btn btn-primary" id="btnOpenGoalModal">
+            <span>🎯</span> Yeni Hedef Ekle
+          </button>
+        </div>
+
+        <!-- Hedef Vizyon Özeti -->
+        <div class="goals-summary-strip" id="goalsSummaryStrip"></div>
+
+        <!-- Hedef Kartları Izgarası -->
+        <div class="goals-grid" id="goalsGrid"></div>
+      </section>
+
+      <!-- =========================================================
+           3.5 GÖRÜNÜM: ODAK & DERS ZAMANLAYICISI + SPOTIFY + SES EFEKTLERİ
+           ========================================================= -->
+      <section class="view-section" id="view-timer">
+        <div class="timer-page-grid">
+          <!-- SOL SÜTUN: POMODORO / DERS / MOLA ZAMANLAYICISI -->
+          <div class="panel-card timer-main-card">
+            <!-- ORTAK ÇALIŞMA ODASI BİLGİ & BAĞLANTI BANDI -->
+            <div class="timer-room-banner" id="timerRoomBanner">
+              <div class="room-banner-left">
+                <span class="room-status-dot offline" id="roomStatusDot"></span>
+                <span class="room-status-text" id="roomStatusText">Tek Başına Çalışma Modu</span>
+              </div>
+              <div class="room-banner-right">
+                <button type="button" class="btn btn-secondary btn-xs" id="btnOpenRoomModal">
+                  👥 Ortak Odaya Bağlan
+                </button>
+                <button type="button" class="btn btn-ghost btn-xs hidden" id="btnLeaveRoom" style="color:var(--danger);">
+                  🚪 Odadan Ayrıl
+                </button>
+              </div>
+            </div>
+
+            <div class="timer-mode-tabs">
+              <button class="pill active" data-timer-mode="study">📚 Ders / Odak Süresi</button>
+              <button class="pill" data-timer-mode="short_break">☕ Kısa Mola</button>
+              <button class="pill" data-timer-mode="long_break">🛋️ Uzun Mola</button>
+            </div>
+
+            <!-- Büyük Dijital Sayaç & Dairesel İlerleme -->
+            <div class="timer-clock-box">
+              <div class="timer-status-badge" id="timerModeStatusLabel">DERS & ODAK OTURUMU</div>
+              <div class="timer-digits" id="timerDigitsDisplay">25:00</div>
+              <div class="timer-progress-bar-wrap">
+                <div class="timer-progress-bar-fill" id="timerProgressBarFill" style="width: 0%;"></div>
+              </div>
+            </div>
+
+            <!-- Başlat / Duraklat / Sıfırla / Atla Kontrolleri -->
+            <div class="timer-main-controls">
+              <button class="btn btn-primary btn-lg" id="btnTimerStartPause">▶️ Başlat</button>
+              <button class="btn btn-secondary" id="btnTimerReset">🔄 Sıfırla</button>
+              <button class="btn btn-ghost" id="btnTimerSkip">⏭️ Sonraki Aşamaya Geç</button>
+            </div>
+
+            <!-- Hızlı Süre Ayarlama & Özel Dakika Seçimi -->
+            <div class="timer-duration-presets">
+              <span class="preset-label">Süre Seç:</span>
+              <button type="button" class="preset-btn" data-set-mins="15">15 dk</button>
+              <button type="button" class="preset-btn" data-set-mins="25">25 dk</button>
+              <button type="button" class="preset-btn" data-set-mins="45">45 dk</button>
+              <button type="button" class="preset-btn" data-set-mins="50">50 dk</button>
+              <button type="button" class="preset-btn" data-set-mins="60">60 dk</button>
+              <button type="button" class="preset-btn" data-set-mins="90">90 dk</button>
+              <div class="custom-mins-box">
+                <input type="number" id="inputCustomTimerMins" min="1" max="240" value="25" title="Özel dakika gir" />
+                <button type="button" class="btn btn-secondary btn-xs" id="btnApplyCustomMins">Ayarla</button>
+              </div>
+            </div>
+
+            <!-- Varsayılan Süre Yapılandırması (Ders / Kısa Mola / Uzun Mola) -->
+            <div class="timer-config-row">
+              <div class="config-field">
+                <label>📚 Ders (dk)</label>
+                <input type="number" id="cfgStudyMins" min="1" max="240" value="25" />
+              </div>
+              <div class="config-field">
+                <label>☕ Kısa Mola (dk)</label>
+                <input type="number" id="cfgShortBreakMins" min="1" max="60" value="5" />
+              </div>
+              <div class="config-field">
+                <label>🛋️ Uzun Mola (dk)</label>
+                <input type="number" id="cfgLongBreakMins" min="1" max="90" value="15" />
+              </div>
+            </div>
+
+            <!-- Hangi Görev Üzerinde Çalışıyorum? -->
+            <div class="timer-task-link-box">
+              <label for="selectTimerLinkedTask">🎯 Şu An Hangi Görev Üzerinde Çalışıyorsun?</label>
+              <select id="selectTimerLinkedTask">
+                <option value="">— Genel Odak / Serbest Çalışma —</option>
+              </select>
+            </div>
+
+            <!-- Bugünkü Odak İstatistikleri -->
+            <div class="timer-stats-strip">
+              <div class="mini-stat">
+                <span class="mini-stat-label">Bugün Tamamlanan Oturum</span>
+                <strong class="mini-stat-val" id="statTimerSessionsToday">0 Oturum</strong>
+              </div>
+              <div class="mini-stat">
+                <span class="mini-stat-label">Bugün Toplam Odak Süresi</span>
+                <strong class="mini-stat-val" id="statTimerMinutesToday">0 dk</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- SAĞ SÜTUN: SPOTIFY MÜZİK ÇALAR + SES EFEKTLERİ & AMBİYANS -->
+          <div class="timer-side-col">
+            <!-- SPOTIFY ENTEGRE MÜZİK PANELİ -->
+            <div class="panel-card">
+              <div class="panel-header">
+                <div>
+                  <h4 class="panel-title">🎵 Spotify Odak & Çalışma Müzikleri</h4>
+                  <p class="panel-subtitle">Ders çalışırken veya mola verirken arka planda dinleyebileceğin listeler</p>
+                </div>
+                <a href="spotify:" class="btn btn-secondary btn-xs" title="Bilgisayarındaki Spotify uygulamasını aç">
+                  🟢 Spotify'ı Aç
+                </a>
+              </div>
+
+              <!-- Hazır Odak Çalma Listeleri -->
+              <div class="spotify-presets-row">
+                <button type="button" class="pill active" data-spotify-uri="playlist/0vvXsWCC9xrXsKd4FyS8kM">
+                  🎧 Lofi Study Beats
+                </button>
+                <button type="button" class="pill" data-spotify-uri="playlist/37i9dQZF1DWZeKCadgRdKQ">
+                  🧠 Deep Focus
+                </button>
+                <button type="button" class="pill" data-spotify-uri="playlist/37i9dQZF1DX4sWSpwq3LiO">
+                  🎹 Peaceful Piano
+                </button>
+                <button type="button" class="pill" data-spotify-uri="playlist/37i9dQZF1DWWEJlAGA9gs0">
+                  🎻 Klasik Çalışma
+                </button>
+                <button type="button" class="pill" data-spotify-uri="playlist/37i9dQZF1DX0SM0LYsmbMT">
+                  ☕ Chill Jazz
+                </button>
+              </div>
+
+              <!-- Özel Spotify Linki Yapıştırma -->
+              <form class="day-col-quick-add" id="formCustomSpotify" style="margin: 10px 0 12px;">
+                <input
+                  type="text"
+                  id="inputCustomSpotifyUrl"
+                  placeholder="Kendi Spotify çalma listesi veya şarkı linkini yapıştır..."
+                />
+                <button type="submit" class="btn btn-primary btn-xs">Yükle</button>
+              </form>
+
+              <!-- Spotify Embed Iframe -->
+              <div class="spotify-embed-container">
+                <iframe
+                  id="spotifyEmbedFrame"
+                  style="border-radius:12px"
+                  src="https://open.spotify.com/embed/playlist/0vvXsWCC9xrXsKd4FyS8kM?utm_source=generator&theme=0"
+                  width="100%"
+                  height="232"
+                  frameBorder="0"
+                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                  loading="lazy"
+                ></iframe>
+              </div>
+            </div>
+
+            <!-- SES EFEKTLERİ VE ARKA PLAN AMBİYANS SESLERİ -->
+            <div class="panel-card">
+              <div class="panel-header">
+                <div>
+                  <h4 class="panel-title">🔊 Ses Efektleri & Odak Ambiyansı</h4>
+                  <p class="panel-subtitle">Zamanlayıcı bitiş çanları ve odaklanmayı artıran arka plan sesleri</p>
+                </div>
+                <button class="btn btn-ghost btn-xs" id="btnTestAlarmSound">🔔 Çan Sesini Dene</button>
+              </div>
+
+              <div class="sound-controls-grid">
+                <div class="sound-row">
+                  <span>🔔 Süre Bitiş & Başlangıç Ses Efektleri</span>
+                  <label class="switch">
+                    <input type="checkbox" id="toggleSoundEffects" checked />
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="sound-row">
+                  <span>🎼 Bitiş Zil Sesi Tipi</span>
+                  <select id="selectBellType" class="compact-select">
+                    <option value="zen">🧘 Zen Tibet Çanı (Huzurlu)</option>
+                    <option value="crystal">✨ Kristal Melodi (Canlandırıcı)</option>
+                    <option value="classic">⏰ Klasik Dijital Uyarı</option>
+                  </select>
+                </div>
+
+                <div class="ambient-section">
+                  <label style="font-size:12px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:6px;">
+                    🌧️ Arka Plan Ambiyans Sesi (Spotify ile birlikte veya tek başına açılabilir)
+                  </label>
+                  <div class="ambient-buttons">
+                    <button type="button" class="pill active" data-ambient="off">🔇 Kapalı</button>
+                    <button type="button" class="pill" data-ambient="rain">🌧️ Yağmur Sesi</button>
+                    <button type="button" class="pill" data-ambient="focus">🌊 Derin Odak (Soft Noise)</button>
+                    <button type="button" class="pill" data-ambient="fire">🔥 Şömine Huzuru</button>
+                  </div>
+                  <div class="volume-row">
+                    <span>🔉 Ses Seviyesi</span>
+                    <input type="range" id="rangeSoundVolume" min="5" max="100" value="60" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =========================================================
+           4. GÖRÜNÜM: TEKRARLAYAN GÖREVLER (RUTİNLER, ARŞİV, ÇÖP KUTUSU & SERİ GEÇMİŞİ)
+           ========================================================= -->
+      <section class="view-section" id="view-routines">
+        <div class="goals-toolbar">
+          <div class="filter-pills">
+            <button class="pill active" data-routine-tab="active">
+              ✨ Aktif Rutinler (<span id="countRoutinesActive">0</span>)
+            </button>
+            <button class="pill" data-routine-tab="archived">
+              📦 Arşivlenenler (<span id="countRoutinesArchived">0</span>)
+            </button>
+            <button class="pill" data-routine-tab="trashed">
+              🗑️ Çöp Kutusu (<span id="countRoutinesTrashed">0</span>)
+            </button>
+          </div>
+          <button class="btn btn-primary" id="btnOpenRoutineModal">
+            <span>🔁</span> Yeni Tekrarlayan Görev Ekle
+          </button>
+        </div>
+
+        <p class="section-lead" id="routinesTabDescription" style="margin-bottom:16px;">
+          Her gün, haftanın belirli günleri veya her hafta düzenli yapmak istediğin görevleri buradan yönet.
+          Silinen rutinler kaybolmaz, <strong>🗑️ Çöp Kutusuna</strong> taşınır. Her rutinin <strong>📊 Önceki Serilerini</strong> kart üzerinde görebilirsin.
+        </p>
+
+        <div class="routines-grid" id="routinesGrid"></div>
+      </section>
+
+      <!-- =========================================================
+           5. GÖRÜNÜM: ERTELEME & NOT ARŞİVİ (SÜRDÜRÜLEBİLİRLİK)
+           ========================================================= -->
+      <section class="view-section" id="view-insights">
+        <div class="insights-top-cards" id="insightsStatsRow"></div>
+
+        <div class="insights-grid">
+          <!-- Sol: Ertelenen Görevler & Sürdürülebilirlik Koçu -->
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <h4 class="panel-title">⏳ Ertelenen Görevler & Darboğaz Analizi</h4>
+                <p class="panel-subtitle">Birden fazla kez ertelenen görevleri fark et, küçült veya yeniden planla</p>
+              </div>
+            </div>
+            <div id="postponedTasksAnalysisList" class="task-list"></div>
+          </div>
+
+          <!-- Sağ: Tüm Görev Notları, Günlük/Haftalık Notlar & Erteleme Sebepleri Arşivi -->
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <h4 class="panel-title">📚 Tüm Notlar & Erteleme Kayıtları</h4>
+                <p class="panel-subtitle">Görevlerin altına yazdığın notlar ve gün sonu düşüncelerin</p>
+              </div>
+              <div class="filter-pills">
+                <button class="pill active" data-note-filter="all">Tümü</button>
+                <button class="pill" data-note-filter="quotes">📜 Kaydedilen Sözler</button>
+                <button class="pill" data-note-filter="task">Görev Notları</button>
+                <button class="pill" data-note-filter="journal">Günlük/Haftalık</button>
+                <button class="pill" data-note-filter="postpone">Erteleme Sebepleri</button>
+              </div>
+            </div>
+            <div id="allNotesArchiveList" class="notes-archive-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =====================================================
+           GÖRÜNÜM 7: NOTLARIM (DERLENMİŞ GÜNLÜK, HAFTALIK & GÖREV NOTLARIM)
+           ===================================================== -->
+      <section id="view-notes" class="view-section">
+        <!-- Üst İstatistik Şeridi -->
+        <div class="goals-summary-strip" id="notesSummaryStrip"></div>
+
+        <!-- Hızlı Günlük Not Ekleme / Seçili Tarihe Not Yazma Kartı -->
+        <div class="panel-card" style="margin-bottom:18px;">
+          <div class="panel-header">
+            <div>
+              <h4 class="panel-title">✍️ Yeni Günlük Not Yaz veya Bir Günün Notunu Güncelle</h4>
+              <p class="panel-subtitle">Seçtiğin tarihin günlük notuna doğrudan buradan yazabilir, ekleme yapabilirsin</p>
+            </div>
+          </div>
+          <form id="formNotesPageQuickAdd" style="display:flex;flex-direction:column;gap:10px;">
+            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+              <label for="inputNotesPageDate" style="font-size:12.5px;font-weight:700;color:var(--text-secondary);">📅 Hangi Günün Notu:</label>
+              <input
+                type="date"
+                id="inputNotesPageDate"
+                style="background:var(--bg-input);border:1px solid var(--border-subtle);color:var(--text-primary);padding:7px 12px;border-radius:8px;font-size:13px;"
+                required
+              />
+              <span id="notesPageDateHumanLabel" style="font-size:12.5px;color:var(--accent-primary);font-weight:600;"></span>
+            </div>
+            <textarea
+              id="textareaNotesPageContent"
+              class="daily-note-textarea"
+              rows="3"
+              placeholder="Bugün veya seçtiğin gün neler yaptın, aklında neler kaldı, kendine ne not bırakmak istersin?..."
+              required
+            ></textarea>
+            <div style="display:flex;justify-content:flex-end;gap:10px;">
+              <button type="submit" class="btn btn-primary btn-sm">💾 Günlük Notu Kaydet</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Derlenmiş Notlar Başlık & Filtre Sekmeleri -->
+        <div class="routines-header-bar">
+          <div>
+            <h3>📓 Tüm Notlarım (Tarih Sırasıyla Derlenmiş Arşiv)</h3>
+            <p class="section-desc">
+              Hangi gün ne not aldığını, görevlerinin ve hedeflerinin altına yazdığın notları ve kaydettiğin günün sözlerini tek sayfada kronolojik olarak incele.
+            </p>
+          </div>
+          <div class="filter-pills">
+            <button class="pill active" data-compiled-note-filter="all">Tümü (<span id="countNotesAll">0</span>)</button>
+            <button class="pill" data-compiled-note-filter="daily">📓 Günün Notları (<span id="countNotesDaily">0</span>)</button>
+            <button class="pill" data-compiled-note-filter="weekly">🧭 Haftalık Notlar (<span id="countNotesWeekly">0</span>)</button>
+            <button class="pill" data-compiled-note-filter="task_goal">📝 Görev & Hedef Notları (<span id="countNotesTaskGoal">0</span>)</button>
+            <button class="pill" data-compiled-note-filter="quotes">📜 Kaydedilen Sözler (<span id="countNotesQuotes">0</span>)</button>
+          </div>
+        </div>
+
+        <!-- Derlenmiş Notlar Zaman Tüneli -->
+        <div id="compiledNotesTimeline" class="compiled-notes-timeline"></div>
+      </section>
+
+      <!-- =====================================================
+           GÖRÜNÜM 8: ÇÖP KUTUSU, ARŞİV & VERİ YÖNETİM MERKEZİ
+           ===================================================== -->
+      <section id="view-trash" class="view-section">
+        <div class="routines-header-bar">
+          <div>
+            <h3>🗑️ Çöp Kutusu, Arşiv & Veri Yönetimi</h3>
+            <p class="section-desc">
+              Silinen görevler, hedefler ve tekrarlayan rutinler doğrudan yok olmaz; burada saklanır. İstediğin zaman geri yükleyebilir, kalıcı olarak silebilir veya verilerini sıfırlayabilirsin.
+            </p>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <div class="filter-pills">
+              <button class="pill active" data-trash-filter="all">Tümü (<span id="countTrashAll">0</span>)</button>
+              <button class="pill" data-trash-filter="routines">🔁 Rutinler & Arşiv (<span id="countTrashRoutines">0</span>)</button>
+              <button class="pill" data-trash-filter="tasks">✅ Silinen Görevler (<span id="countTrashTasks">0</span>)</button>
+              <button class="pill" data-trash-filter="goals">🎯 Silinen Hedefler (<span id="countTrashGoals">0</span>)</button>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="btnEmptyTrashBin" style="color:var(--danger);border-color:rgba(244,63,94,0.35);">
+              🔥 Çöp Kutusunu Boşalt
+            </button>
+            <button class="btn btn-secondary btn-sm" id="btnOpenResetFromTrashView">
+              🧹 Verileri Sıfırla...
+            </button>
+          </div>
+        </div>
+
+        <div id="trashCenterList" class="routines-list" style="margin-top:14px;"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- =========================================================
+       MODALLAR (GÖREV EKLE/DÜZENLE, ERTELEME, HEDEF, RUTİN)
+       ========================================================= -->
+
+  <!-- 1. GÖREV EKLEME / DÜZENLEME MODALI -->
+  <div class="modal-backdrop hidden" id="modalTask">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modalTaskTitle">Yeni Görev Ekle</h3>
+        <button class="btn-close" data-close-modal="modalTask">✕</button>
+      </div>
+      <form id="formTaskModal" class="modal-body">
+        <input type="hidden" id="taskModalId" />
+
+        <div class="form-group">
+          <label for="taskModalName">Görev Başlığı *</label>
+          <input type="text" id="taskModalName" placeholder="Örn: Haftalık bütçe kontrolü yap" required />
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="taskModalScope">Zamanlama Biçimi</label>
+            <select id="taskModalScope">
+              <option value="day">📌 Belirli Bir Gün (Günlük)</option>
+              <option value="week">🧺 Haftalık Esnek (Gün Seçmeden Bu Hafta)</option>
+            </select>
+          </div>
+          <div class="form-group" id="taskModalDateGroup">
+            <label for="taskModalDate">Görev Tarihi</label>
+            <input type="date" id="taskModalDate" />
+          </div>
+          <div class="form-group hidden" id="taskModalWeekGroup">
+            <label for="taskModalWeekDate">Hangi Haftanın Görevi? (Haftadan Bir Gün Seç)</label>
+            <input type="date" id="taskModalWeekDate" />
+          </div>
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="taskModalGoal">Bağlı Olduğu Hedef (Kısa / Uzun Vadeli)</label>
+            <select id="taskModalGoal">
+              <option value="">— Hedef Bağlantısı Yok —</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="taskModalPriority">Öncelik Seviyesi</label>
+            <select id="taskModalPriority">
+              <option value="normal">🔵 Normal Öncelik</option>
+              <option value="high">🔴 Yüksek / Kritik</option>
+              <option value="postponed">⏳ Ertelenmiş</option>
+              <option value="low">🟢 Düşük / Esnek</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="taskModalCategory">Kategori / Yaşam Alanı</label>
+          <select id="taskModalCategory">
+            <option value="Genel">📌 Genel</option>
+            <option value="Kariyer & Eğitim">💼 Kariyer & Eğitim</option>
+            <option value="Sağlık & Spor">💪 Sağlık & Spor</option>
+            <option value="Kişisel Gelişim">📚 Kişisel Gelişim</option>
+            <option value="Finans">💰 Finans & Bütçe</option>
+            <option value="Yaşam & Düzen">🏠 Yaşam & Ev Düzeni</option>
+            <option value="Sosyal & İlişkiler">🤝 Sosyal & İlişkiler</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="taskModalNote">Görev Altı Notu / Detaylar</label>
+          <textarea
+            id="taskModalNote"
+            rows="3"
+            placeholder="Görevle ilgili bağlantılar, dikkat edilecek noktalar veya kendi notların..."
+          ></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Alt Adımlar (İsteğe Bağlı Küçük Kontrol Listesi)</label>
+          <div id="taskModalSubtasksList" class="subtasks-editor-list"></div>
+          <div class="subtask-add-row">
+            <input type="text" id="inputNewSubtask" placeholder="Alt adım yazıp '+' butonuna bas..." />
+            <button type="button" class="btn btn-secondary btn-sm" id="btnAddSubtaskModal">＋ Ekle</button>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-close-modal="modalTask">İptal</button>
+          <button type="submit" class="btn btn-primary">Görevi Kaydet</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 2. ERTELEME (SNOOZE / POSTPONE) MODALI -->
+  <div class="modal-backdrop hidden" id="modalPostpone">
+    <div class="modal-card modal-sm">
+      <div class="modal-header">
+        <h3>⏭️ Görevi Ertele & Yeniden Planla</h3>
+        <button class="btn-close" data-close-modal="modalPostpone">✕</button>
+      </div>
+      <form id="formPostponeModal" class="modal-body">
+        <input type="hidden" id="postponeTaskId" />
+        <p class="postpone-task-title" id="postponeTaskTitleDisplay"></p>
+
+        <div class="form-group">
+          <label>Hızlı Erteleme Seçenekleri</label>
+          <div class="postpone-quick-grid">
+            <button type="button" class="postpone-chip active" data-postpone-opt="tomorrow">
+              ☀️ Yarına (+1 Gün)
+            </button>
+            <button type="button" class="postpone-chip" data-postpone-opt="in2days">
+              🌤️ 2 Gün Sonraya
+            </button>
+            <button type="button" class="postpone-chip" data-postpone-opt="weekend">
+              🛋️ Bu Hafta Sonuna
+            </button>
+            <button type="button" class="postpone-chip" data-postpone-opt="nextweek">
+              📅 Gelecek Haftaya (+7 Gün)
+            </button>
+            <button type="button" class="postpone-chip" data-postpone-opt="weekpool">
+              🧺 Bu Haftanın Esnek Havuzuna Al
+            </button>
+            <button type="button" class="postpone-chip" data-postpone-opt="custom">
+              📆 Özel Tarih Seç
+            </button>
+          </div>
+        </div>
+
+        <div class="form-group" id="postponeCustomDateGroup">
+          <label for="postponeTargetDate">Yeni Tarih</label>
+          <input type="date" id="postponeTargetDate" required />
+        </div>
+
+        <div class="form-group">
+          <label for="postponeReasonInput">Erteleme Notu / Sebebi (İsteğe Bağlı)</label>
+          <div class="reason-chips">
+            <button type="button" class="reason-tag" data-reason="Vakit yetmedi">⏰ Vakit yetmedi</button>
+            <button type="button" class="reason-tag" data-reason="Enerjim düşüktü">🔋 Enerjim düşüktü</button>
+            <button type="button" class="reason-tag" data-reason="Öncelik değişti">🔄 Öncelik değişti</button>
+            <button type="button" class="reason-tag" data-reason="Görev gözümde büyüdü">⛰️ Görev büyüktü</button>
+            <button type="button" class="reason-tag" data-reason="Başka bir işi bekliyor">⏳ Başka işi bekliyor</button>
+          </div>
+          <textarea
+            id="postponeReasonInput"
+            rows="2"
+            placeholder="Neden ertelendiğine dair kısa bir not bırak (sonraki gün hatırlamana yardımcı olur)..."
+          ></textarea>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-close-modal="modalPostpone">Vazgeç</button>
+          <button type="submit" class="btn btn-warning">Ertelemeyi Onayla</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 3. HEDEF EKLEME / DÜZENLEME MODALI (KISA & UZUN VADELİ) -->
+  <div class="modal-backdrop hidden" id="modalGoal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modalGoalTitle">🎯 Yeni Hedef Tanımla</h3>
+        <button class="btn-close" data-close-modal="modalGoal">✕</button>
+      </div>
+      <form id="formGoalModal" class="modal-body">
+        <input type="hidden" id="goalModalId" />
+
+        <div class="form-group">
+          <label for="goalModalName">Hedef Başlığı *</label>
+          <input
+            type="text"
+            id="goalModalName"
+            placeholder="Örn: İngilizce IELTS 7.5 Skoruna Ulaşmak / 6 Ayda Acil Durum Fonu Oluşturmak"
+            required
+          />
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="goalModalHorizon">Hedef Vadesi (Türü) *</label>
+            <select id="goalModalHorizon">
+              <option value="short">⚡ Kısa Vadeli Hedef (Haftalık / 1-3 Aylık)</option>
+              <option value="long">🏔️ Uzun Vadeli Hedef (6 Ay / 1-5 Yıllık Vizyon)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="goalModalCategory">Kategori / Alan</label>
+            <select id="goalModalCategory">
+              <option value="Kariyer & Eğitim">💼 Kariyer & Eğitim</option>
+              <option value="Sağlık & Spor">💪 Sağlık & Spor</option>
+              <option value="Kişisel Gelişim">📚 Kişisel Gelişim</option>
+              <option value="Finans">💰 Finans & Birikim</option>
+              <option value="Yaşam & Düzen">🏠 Yaşam & Düzen</option>
+              <option value="Sosyal & İlişkiler">🤝 Sosyal & İlişkiler</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Hızlı Vade Süresi Seçicisi -->
+        <div class="form-group">
+          <label>Hızlı Vade Süresi Seç (Veya Aşağıdan Tarih Gir)</label>
+          <div class="horizon-presets">
+            <button type="button" class="preset-btn" data-days="14">2 Hafta</button>
+            <button type="button" class="preset-btn" data-days="30">1 Ay</button>
+            <button type="button" class="preset-btn" data-days="90">3 Ay (Çeyrek)</button>
+            <button type="button" class="preset-btn" data-days="180">6 Ay</button>
+            <button type="button" class="preset-btn" data-days="365">1 Yıl</button>
+            <button type="button" class="preset-btn" data-days="1095">3 Yıl</button>
+          </div>
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="goalModalStartDate">Başlangıç Tarihi</label>
+            <input type="date" id="goalModalStartDate" required />
+          </div>
+          <div class="form-group">
+            <label for="goalModalTargetDate">Hedef Vade (Bitiş) Tarihi *</label>
+            <input type="date" id="goalModalTargetDate" required />
+          </div>
+        </div>
+
+        <div class="form-group" id="goalParentGroup">
+          <label for="goalModalParent">Üst Hedef Bağlantısı (Kısa vadeli hedefi uzun vadeli hedefe bağla)</label>
+          <select id="goalModalParent">
+            <option value="">— Bağımsız Hedef —</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="goalModalWhy">Neden Bu Hedefi İstiyorum? & Notlar (Motivasyon Pusulası)</label>
+          <textarea
+            id="goalModalWhy"
+            rows="3"
+            placeholder="Bu hedefe ulaştığında hayatında ne değişecek? Stratejin ve notların neler?"
+          ></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Kilometre Taşları / Alt Adımlar (İsteğe Bağlı)</label>
+          <div id="goalModalMilestonesList" class="subtasks-editor-list"></div>
+          <div class="subtask-add-row">
+            <input type="text" id="inputNewMilestone" placeholder="Örn: İlk deneme sınavını çöz..." />
+            <button type="button" class="btn btn-secondary btn-sm" id="btnAddMilestoneModal">＋ Ekle</button>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-close-modal="modalGoal">İptal</button>
+          <button type="submit" class="btn btn-primary">Hedefi Kaydet</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 4. TEKRARLAYAN GÖREV (RUTİN) MODALI -->
+  <div class="modal-backdrop hidden" id="modalRoutine">
+    <div class="modal-card modal-sm">
+      <div class="modal-header">
+        <h3 id="modalRoutineTitle">🔁 Tekrarlayan Görev (Rutin) Ekle</h3>
+        <button class="btn-close" data-close-modal="modalRoutine">✕</button>
+      </div>
+      <form id="formRoutineModal" class="modal-body">
+        <input type="hidden" id="routineModalId" />
+
+        <div class="form-group">
+          <label for="routineModalName">Tekrarlayan Görev Başlığı *</label>
+          <input
+            type="text"
+            id="routineModalName"
+            placeholder="Örn: 25 dk İngilizce Kelime & Okuma / Sabah Yürüyüşü"
+            required
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="routineModalFreq">Tekrar Sıklığı</label>
+          <select id="routineModalFreq">
+            <option value="daily">☀️ Her Gün</option>
+            <option value="weekdays">💼 Hafta İçi Her Gün (Pzt - Cum)</option>
+            <option value="weekends">🛋️ Hafta Sonları (Cmt - Paz)</option>
+            <option value="custom_days">📅 Haftanın Belirli Günleri</option>
+          </select>
+        </div>
+
+        <div class="form-group hidden" id="routineCustomDaysGroup">
+          <label>Hangi Günler Tekrarlansın?</label>
+          <div class="weekday-selector" id="routineWeekdaySelector">
+            <button type="button" class="day-toggle active" data-day="1">Pzt</button>
+            <button type="button" class="day-toggle" data-day="2">Sal</button>
+            <button type="button" class="day-toggle active" data-day="3">Çar</button>
+            <button type="button" class="day-toggle" data-day="4">Per</button>
+            <button type="button" class="day-toggle active" data-day="5">Cum</button>
+            <button type="button" class="day-toggle" data-day="6">Cmt</button>
+            <button type="button" class="day-toggle" data-day="0">Paz</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="routineModalGoal">Bağlı Olduğu Hedef (İsteğe Bağlı)</label>
+          <select id="routineModalGoal">
+            <option value="">— Hedef Bağlantısı Yok —</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="routineModalNote">Rutin Notu / Kuralı (Altında görünür)</label>
+          <textarea
+            id="routineModalNote"
+            rows="2"
+            placeholder="Örn: Çok yorgun olsam bile en az 5 dakika yapacağım (Sıfır gün yok kuralı)"
+          ></textarea>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-close-modal="modalRoutine">İptal</button>
+          <button type="submit" class="btn btn-primary">Rutini Kaydet</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 5. VERİLERİ SIFIRLAMA & TEMİZ BAŞLANGIÇ MODALI -->
+  <div class="modal-backdrop hidden" id="modalResetData">
+    <div class="modal-card modal-sm">
+      <div class="modal-header">
+        <h3>🧹 Verileri Sıfırlama & Temiz Başlangıç</h3>
+        <button class="btn-close" data-close-modal="modalResetData">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+        <p style="font-size:13px;color:var(--text-secondary);line-height:1.5;">
+          Planlayıcıdaki verilerini nasıl sıfırlamak istediğini seçebilirsin. İşlem öncesinde dilersen <strong>💾 Yedekle</strong> butonuyla mevcut durumunu indirebilirsin.
+        </p>
+
+        <div class="reset-option-card">
+          <div>
+            <strong style="font-size:14px;display:block;margin-bottom:4px;">🌱 Tertemiz Boş Sayfa Aç (Sıfırdan Başla)</strong>
+            <span style="font-size:12px;color:var(--text-secondary);">
+              Tüm örnek/mevcut görevleri, hedefleri, rutinleri ve notları tamamen temizler. Kendi düzenini 0'dan kurman için bembeyaz bir sayfa açar.
+            </span>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="btnResetToBlank" style="background:var(--danger);border-color:var(--danger);white-space:nowrap;">
+            🧹 Tümünü Sıfırla (Boşlat)
+          </button>
+        </div>
+
+        <div class="reset-option-card">
+          <div>
+            <strong style="font-size:14px;display:block;margin-bottom:4px;">🗑️ Sadece Çöp Kutusunu Temizle</strong>
+            <span style="font-size:12px;color:var(--text-secondary);">
+              Aktif görev, hedef ve rutinlerine dokunmaz; yalnızca Çöp Kutusu'ndaki silinmiş öğeleri kalıcı olarak temizler.
+            </span>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" id="btnResetOnlyTrash" style="white-space:nowrap;">
+            🗑️ Çöpü Boşalt
+          </button>
+        </div>
+
+        <div class="reset-option-card">
+          <div>
+            <strong style="font-size:14px;display:block;margin-bottom:4px;">🔄 Varsayılan Örnek Verilere Dön</strong>
+            <span style="font-size:12px;color:var(--text-secondary);">
+              Uygulamanın ilk açılışındaki örnek görev, hedef ve tekrarlayan rutin şablonunu geri yükler.
+            </span>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" id="btnResetToSample" style="white-space:nowrap;">
+            🔄 Örnek Şablonu Yükle
+          </button>
+        </div>
+
+        <div class="modal-footer" style="margin-top:4px;">
+          <button type="button" class="btn btn-ghost" data-close-modal="modalResetData">Vazgeç</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ORTAK POMODORO ODASI MODALI -->
+  <div class="modal-backdrop hidden" id="modalRoomConnect">
+    <div class="modal-card modal-sm">
+      <div class="modal-header">
+        <h3>👥 Ortak Pomodoro & Çalışma Odası</h3>
+        <button class="btn-close" data-close-modal="modalRoomConnect">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:16px;">
+        <p style="font-size:12.5px;color:var(--text-secondary);line-height:1.5;">
+          Arkadaşınla eşzamanlı ders çalışmak için bir oda kurabilir veya arkadaşının kurduğu odaya katılabilirsin. Başlatma, duraklatma ve mola zilleri her iki bilgisayarda da <strong>birebir aynı anda</strong> çalar!
+        </p>
+
+        <!-- Kendi İsmin -->
+        <div class="form-group">
+          <label for="inputRoomUserName">Adın / Takma Adın</label>
+          <input type="text" id="inputRoomUserName" placeholder="Örn: Ege" maxlength="20" />
+        </div>
+
+        <!-- SEÇENEK A: YENİ ODA KUR -->
+        <div class="room-action-card">
+          <div>
+            <strong style="font-size:13.5px;display:block;margin-bottom:2px;">🏠 Yeni Bir Oda Kur</strong>
+            <span style="font-size:11.5px;color:var(--text-muted);">Sana özel bir oda kodu üretilir, bu kodu arkadaşına atman yeterlidir.</span>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="btnCreateRoom">
+            Oda Oluştur
+          </button>
+        </div>
+
+        <!-- SEÇENEK B: MEVCUT ODAYA KATIL -->
+        <div class="room-action-card">
+          <div style="flex:1;">
+            <strong style="font-size:13.5px;display:block;margin-bottom:4px;">🔑 Arkadaşının Odasına Katıl</strong>
+            <input type="text" id="inputRoomCode" placeholder="Oda Kodunu Gir (Örn: PUSULA-482)" style="width:100%;text-transform:uppercase;" />
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" id="btnJoinRoom" style="align-self:flex-end;">
+            Odaya Katıl
+          </button>
+        </div>
+
+        <!-- AKTİF BAĞLANTI DURUMU BİLGİSİ -->
+        <div id="roomActiveInfoBox" class="room-info-active-box hidden">
+          <div class="room-code-display-wrap">
+            <span style="font-size:12px;color:var(--text-secondary);">Oda Kodun:</span>
+            <div class="room-code-badge" id="displayRoomCode">---</div>
+            <button type="button" class="btn btn-ghost btn-xs" id="btnCopyRoomCode" title="Kodu Kopyala">📋 Kopyala</button>
+          </div>
+          <div class="room-peer-status" id="roomPeerStatus">
+            ⏳ Arkadaşının bağlanması bekleniyor...
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Yüzen Mini Zamanlayıcı (Başka sayfalardayken süre çalışıyorsa görünür) -->
+  <div id="floatingTimerBar" class="floating-timer-bar hidden">
+    <span class="floating-timer-mode" id="floatingTimerMode">📚 Ders</span>
+    <strong class="floating-timer-digits" id="floatingTimerDigits">25:00</strong>
+    <button type="button" class="btn btn-primary btn-xs" id="btnFloatingStartPause">⏸️</button>
+    <button type="button" class="btn btn-ghost btn-xs" id="btnFloatingOpenTimer">Aç →</button>
+  </div>
+
+  <!-- Bildirim (Toast) Alanı -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="peerjs.min.js"></script>
+  <script src="quotes.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
