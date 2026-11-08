@@ -2832,6 +2832,12 @@ html[data-theme="light"] .btn-footer-reset {
   background: var(--text-muted);
 }
 
+.room-status-dot.waiting {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+  animation: pulseDot 1.5s infinite;
+}
+
 .room-status-dot.online {
   background: var(--success);
   box-shadow: 0 0 8px rgba(127, 159, 106, 0.6);
@@ -2842,6 +2848,58 @@ html[data-theme="light"] .btn-footer-reset {
   0% { transform: scale(0.95); opacity: 0.8; }
   50% { transform: scale(1.15); opacity: 1; }
   100% { transform: scale(0.95); opacity: 0.8; }
+}
+
+.room-participants-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.room-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.room-chip.host {
+  border-color: rgba(var(--accent-rgb), 0.4);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+
+.room-chip.peer {
+  border-color: rgba(127, 159, 106, 0.4);
+  background: rgba(127, 159, 106, 0.12);
+  color: var(--success);
+  font-weight: 600;
+}
+
+.room-chip.waiting {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+  font-style: italic;
+}
+
+.room-participant-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
 }
 
 .room-banner-right {

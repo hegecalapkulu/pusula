@@ -3518,6 +3518,7 @@
     peer: null,
     conn: null,
     isHost: false,
+    isWaiting: false,
     roomCode: null,
     connectedPeerName: null,
     myUserName: "Ben"
@@ -3530,6 +3531,21 @@
       const inp = document.getElementById("inputRoomUserName");
       if (inp) inp.value = savedName;
     }
+
+    // URL parametresinde oda kodu var mı kontrol et (?room=PUSULA-XXX)
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const roomParam = urlParams.get("room");
+      if (roomParam) {
+        setTimeout(() => {
+          switchView("timer");
+          openModal("modalRoomConnect");
+          const inp = document.getElementById("inputRoomCode");
+          if (inp) inp.value = roomParam.trim().toUpperCase();
+          showToast(`🔑 ${roomParam.toUpperCase()} oda kodu hazır! İsim yazıp "Odaya Katıl"a basabilirsin.`);
+        }, 500);
+      }
+    } catch (_) {}
   }
 
   function broadcastTimerAction(action, data = {}) {
@@ -3584,36 +3600,45 @@
 
     conn.on("open", () => {
       // Bağlantı başarılı!
+      roomState.isWaiting = false;
       conn.send({
         type: "HANDSHAKE",
         name: roomState.myUserName
       });
-      updateRoomUI(true);
+      updateRoomUI();
       showToast(`🎉 Ortak Çalışma Odasına bağlandınız!`);
-      closeModal("modalRoomConnect");
     });
 
     conn.on("data", (data) => {
       if (data.type === "HANDSHAKE") {
+        roomState.isWaiting = false;
         roomState.connectedPeerName = data.name || "Arkadaşın";
-        updateRoomUI(true);
+        updateRoomUI();
         showToast(`👋 ${roomState.connectedPeerName} odaya katıldı!`);
       } else if (data.type === "TIMER_SYNC") {
         handleIncomingTimerAction(data);
+      } else if (data.type === "ROOM_CLOSED") {
+        showToast(`🛑 ${data.sender || "Oda kurucusu"} odayı kapattı.`);
+        leavePomodoroRoom(false);
       }
     });
 
     conn.on("close", () => {
       showToast("ℹ️ Arkadaşınız odadan ayrıldı.");
-      updateRoomUI(false);
-      roomState.conn = null;
-      roomState.connectedPeerName = null;
+      if (roomState.isHost) {
+        roomState.isWaiting = true;
+        roomState.conn = null;
+        roomState.connectedPeerName = null;
+        updateRoomUI();
+      } else {
+        leavePomodoroRoom(false);
+      }
     });
 
     conn.on("error", (err) => {
       console.warn("Peer connection error:", err);
-      showToast("⚠️ Bağlantı kesildi.");
-      updateRoomUI(false);
+      showToast("⚠️ Bağlantı hatası oluştu.");
+      updateRoomUI();
     });
   }
 
@@ -3633,28 +3658,23 @@
     const peerId = "pusulapp-room-" + randomCode.toLowerCase();
 
     if (roomState.peer) {
-      roomState.peer.destroy();
+      try { roomState.peer.destroy(); } catch (_) {}
     }
 
-    const statusEl = document.getElementById("roomPeerStatus");
-    if (statusEl) statusEl.textContent = "⏳ Oda kuruluyor, lütfen bekleyin...";
+    roomState.isHost = true;
+    roomState.isWaiting = true;
+    roomState.roomCode = randomCode;
+    roomState.connectedPeerName = null;
 
-    const activeBox = document.getElementById("roomActiveInfoBox");
-    if (activeBox) activeBox.classList.remove("hidden");
-
-    const codeBadge = document.getElementById("displayRoomCode");
-    if (codeBadge) codeBadge.textContent = randomCode;
+    updateRoomUI();
 
     try {
       const peer = new Peer(peerId);
       roomState.peer = peer;
-      roomState.isHost = true;
-      roomState.roomCode = randomCode;
 
       peer.on("open", () => {
-        if (statusEl) {
-          statusEl.innerHTML = `✅ <strong>Oda hazır!</strong> Yukarıdaki kodu arkadaşına gönder. Arkadaşın bağlandığında sayaçlarınız kilitlenecek.`;
-        }
+        updateRoomUI();
+        showToast(`🏠 ${randomCode} kodlu oda kuruldu! Arkadaşını davet edebilirsin.`);
       });
 
       peer.on("connection", (conn) => {
@@ -3664,15 +3684,16 @@
       peer.on("error", (err) => {
         console.warn("PeerJS host error:", err);
         if (err.type === "unavailable-id") {
-          // Kod çakışması, tekrar dene
           createPomodoroRoom();
         } else {
           showToast("⚠️ Oda kurulamadı. Lütfen tekrar deneyin.");
+          closePomodoroRoom();
         }
       });
     } catch (e) {
       console.warn("Peer error:", e);
       showToast("⚠️ Oda oluşturulurken hata meydana geldi.");
+      closePomodoroRoom();
     }
   }
 
@@ -3696,14 +3717,19 @@
     const targetPeerId = "pusulapp-room-" + code.toLowerCase();
 
     if (roomState.peer) {
-      roomState.peer.destroy();
+      try { roomState.peer.destroy(); } catch (_) {}
     }
+
+    roomState.isHost = false;
+    roomState.isWaiting = true;
+    roomState.roomCode = code;
+    roomState.connectedPeerName = null;
+
+    updateRoomUI();
 
     try {
       const peer = new Peer();
       roomState.peer = peer;
-      roomState.isHost = false;
-      roomState.roomCode = code;
 
       peer.on("open", () => {
         const conn = peer.connect(targetPeerId, { reliable: true });
@@ -3713,53 +3739,179 @@
       peer.on("error", (err) => {
         console.warn("PeerJS join error:", err);
         showToast("⚠️ Odaya bağlanılamadı. Kodun doğruluğunu kontrol edin.");
+        leavePomodoroRoom(false);
       });
     } catch (e) {
       console.warn("Peer join error:", e);
       showToast("⚠️ Odaya bağlanırken hata oluştu.");
+      leavePomodoroRoom(false);
     }
   }
 
-  function leavePomodoroRoom() {
-    if (roomState.conn) {
+  function closePomodoroRoom() {
+    if (roomState.conn && roomState.conn.open) {
+      try {
+        roomState.conn.send({
+          type: "ROOM_CLOSED",
+          sender: roomState.myUserName
+        });
+      } catch (_) {}
       roomState.conn.close();
+    }
+    if (roomState.peer) {
+      try { roomState.peer.destroy(); } catch (_) {}
+    }
+    roomState.peer = null;
+    roomState.conn = null;
+    roomState.isHost = false;
+    roomState.isWaiting = false;
+    roomState.roomCode = null;
+    roomState.connectedPeerName = null;
+    updateRoomUI();
+    showToast("🛑 Oda kapatıldı. Bireysel çalışma moduna dönüldü.");
+  }
+
+  function leavePomodoroRoom(notify = true) {
+    if (roomState.conn) {
+      try { roomState.conn.close(); } catch (_) {}
       roomState.conn = null;
     }
     if (roomState.peer) {
-      roomState.peer.destroy();
+      try { roomState.peer.destroy(); } catch (_) {}
       roomState.peer = null;
     }
+    roomState.isHost = false;
+    roomState.isWaiting = false;
     roomState.roomCode = null;
     roomState.connectedPeerName = null;
-    updateRoomUI(false);
-    showToast("🚪 Odadan ayrıldınız. Bireysel moda dönüldü.");
+    updateRoomUI();
+    if (notify) {
+      showToast("🚪 Odadan ayrıldınız. Bireysel moda dönüldü.");
+    }
   }
 
-  function updateRoomUI(isConnected) {
+  function copyRoomInviteLink() {
+    if (!roomState.roomCode) return;
+    const link = `https://hegecalapkulu.github.io/pusula/?room=${roomState.roomCode}`;
+    const text = `Pusula'da ortak pomodoro odama katıl: ${link} (Kod: ${roomState.roomCode})`;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      showToast("🔗 Davet linki kopyalandı! Arkadaşına gönderebilirsin.");
+    }
+  }
+
+  function updateRoomUI() {
     const dot = document.getElementById("roomStatusDot");
     const text = document.getElementById("roomStatusText");
-    const leaveBtn = document.getElementById("btnLeaveRoom");
+    const partBar = document.getElementById("roomParticipantsBar");
     const openBtn = document.getElementById("btnOpenRoomModal");
+    const closeBtn = document.getElementById("btnCloseRoom");
+    const leaveBtn = document.getElementById("btnLeaveRoom");
+    const copyLinkBtn = document.getElementById("btnCopyRoomLinkBanner");
+
+    const modalActiveBox = document.getElementById("roomActiveInfoBox");
+    const modalCodeBadge = document.getElementById("displayRoomCode");
+    const modalPeerStatus = document.getElementById("roomPeerStatus");
+    const modalRoleBadge = document.getElementById("roomRoleBadge");
+    const modalPartList = document.getElementById("roomParticipantsModalList");
+    const btnModalClose = document.getElementById("btnModalCloseRoom");
+    const btnModalLeave = document.getElementById("btnModalLeaveRoom");
+
+    const isConnected = !!(roomState.conn && roomState.conn.open && roomState.connectedPeerName);
+    const isRoomOpen = !!(roomState.roomCode && roomState.peer);
 
     if (isConnected) {
-      if (dot) {
-        dot.className = "room-status-dot online";
+      // 1. TAM BAĞLI DURUM
+      if (dot) dot.className = "room-status-dot online";
+      if (text) text.innerHTML = `🟢 <strong>Ortak Oda:</strong> ${escapeHtml(roomState.connectedPeerName)} ile eşzamanlı (${roomState.roomCode})`;
+      if (partBar) {
+        partBar.classList.remove("hidden");
+        const hostTag = roomState.isHost ? `👑 ${escapeHtml(roomState.myUserName)} (Sen)` : `👑 ${escapeHtml(roomState.connectedPeerName)} (Host)`;
+        const guestTag = roomState.isHost ? `🟢 ${escapeHtml(roomState.connectedPeerName)}` : `🟢 ${escapeHtml(roomState.myUserName)} (Sen)`;
+        partBar.innerHTML = `<span class="room-chip host">${hostTag}</span><span class="room-chip peer">${guestTag}</span>`;
       }
-      if (text) {
-        const other = roomState.connectedPeerName || "Arkadaşın";
-        text.innerHTML = `🟢 <strong>Ortak Odadasınız:</strong> ${escapeHtml(other)} ile eşzamanlı çalışıyorsunuz (${roomState.roomCode})`;
+      if (openBtn) {
+        openBtn.textContent = "👥 Oda & Katılımcılar";
+        openBtn.classList.remove("hidden");
       }
-      if (leaveBtn) leaveBtn.classList.remove("hidden");
-      if (openBtn) openBtn.classList.add("hidden");
+      if (copyLinkBtn) copyLinkBtn.classList.remove("hidden");
+
+      if (roomState.isHost) {
+        if (closeBtn) closeBtn.classList.remove("hidden");
+        if (leaveBtn) leaveBtn.classList.add("hidden");
+        if (btnModalClose) btnModalClose.classList.remove("hidden");
+        if (btnModalLeave) btnModalLeave.classList.add("hidden");
+      } else {
+        if (closeBtn) closeBtn.classList.add("hidden");
+        if (leaveBtn) leaveBtn.classList.remove("hidden");
+        if (btnModalClose) btnModalClose.classList.add("hidden");
+        if (btnModalLeave) btnModalLeave.classList.remove("hidden");
+      }
+
+      if (modalActiveBox) modalActiveBox.classList.remove("hidden");
+      if (modalCodeBadge) modalCodeBadge.textContent = roomState.roomCode;
+      if (modalPeerStatus) modalPeerStatus.innerHTML = `🎉 <strong>Bağlantı kuruldu!</strong> Sayaç hareketleri her iki ekranda anlık senkronize.`;
+      if (modalRoleBadge) modalRoleBadge.textContent = roomState.isHost ? "👑 Oda Kurucusu (Host)" : "👤 Katılımcı";
+      if (modalPartList) {
+        const p1 = roomState.isHost ? `👑 <strong>${escapeHtml(roomState.myUserName)}</strong> (Sen / Host)` : `👑 <strong>${escapeHtml(roomState.connectedPeerName)}</strong> (Host)`;
+        const p2 = roomState.isHost ? `🟢 <strong>${escapeHtml(roomState.connectedPeerName)}</strong> (Bağlı)` : `🟢 <strong>${escapeHtml(roomState.myUserName)}</strong> (Sen / Bağlı)`;
+        modalPartList.innerHTML = `
+          <div class="room-participant-row"><span>${p1}</span><span class="room-chip host">Aktif</span></div>
+          <div class="room-participant-row"><span>${p2}</span><span class="room-chip peer">Bağlı</span></div>
+        `;
+      }
+    } else if (isRoomOpen) {
+      // 2. ODA AÇIK AMA ARKADAŞ BEKLENİYOR
+      if (dot) dot.className = "room-status-dot waiting";
+      if (text) text.innerHTML = `🟡 <strong>Oda Açık:</strong> Arkadaşın bekleniyor (${roomState.roomCode})`;
+      if (partBar) {
+        partBar.classList.remove("hidden");
+        partBar.innerHTML = `<span class="room-chip host">👑 ${escapeHtml(roomState.myUserName)} (Hazır)</span><span class="room-chip waiting">⏳ Katılım Bekleniyor...</span>`;
+      }
+      if (openBtn) {
+        openBtn.textContent = "👥 Oda & Katılımcılar";
+        openBtn.classList.remove("hidden");
+      }
+      if (copyLinkBtn) copyLinkBtn.classList.remove("hidden");
+
+      if (roomState.isHost) {
+        if (closeBtn) closeBtn.classList.remove("hidden");
+        if (leaveBtn) leaveBtn.classList.add("hidden");
+        if (btnModalClose) btnModalClose.classList.remove("hidden");
+        if (btnModalLeave) btnModalLeave.classList.add("hidden");
+      } else {
+        if (closeBtn) closeBtn.classList.add("hidden");
+        if (leaveBtn) leaveBtn.classList.remove("hidden");
+        if (btnModalClose) btnModalClose.classList.add("hidden");
+        if (btnModalLeave) btnModalLeave.classList.remove("hidden");
+      }
+
+      if (modalActiveBox) modalActiveBox.classList.remove("hidden");
+      if (modalCodeBadge) modalCodeBadge.textContent = roomState.roomCode;
+      if (modalPeerStatus) modalPeerStatus.innerHTML = `⏳ <strong>Arkadaşının odaya bağlanması bekleniyor...</strong> Kodu veya linki gönder.`;
+      if (modalRoleBadge) modalRoleBadge.textContent = roomState.isHost ? "👑 Oda Kurucusu (Host)" : "👤 Katılımcı";
+      if (modalPartList) {
+        modalPartList.innerHTML = `
+          <div class="room-participant-row"><span>👑 <strong>${escapeHtml(roomState.myUserName)}</strong> (Sen)</span><span class="room-chip host">Hazır</span></div>
+          <div class="room-participant-row" style="opacity:0.65;"><span>👤 Katılımcı</span><span class="room-chip waiting">Bekleniyor...</span></div>
+        `;
+      }
     } else {
-      if (dot) {
-        dot.className = "room-status-dot offline";
+      // 3. KAPALI / BİREYSEL MOD
+      if (dot) dot.className = "room-status-dot offline";
+      if (text) text.textContent = "Tek Başına Çalışma Modu";
+      if (partBar) partBar.classList.add("hidden");
+      if (openBtn) {
+        openBtn.textContent = "👥 Ortak Odaya Bağlan";
+        openBtn.classList.remove("hidden");
       }
-      if (text) {
-        text.textContent = "Tek Başına Çalışma Modu";
-      }
+      if (copyLinkBtn) copyLinkBtn.classList.add("hidden");
+      if (closeBtn) closeBtn.classList.add("hidden");
       if (leaveBtn) leaveBtn.classList.add("hidden");
-      if (openBtn) openBtn.classList.remove("hidden");
+
+      if (modalActiveBox) modalActiveBox.classList.add("hidden");
+      if (btnModalClose) btnModalClose.classList.add("hidden");
+      if (btnModalLeave) btnModalLeave.classList.add("hidden");
     }
   }
 
@@ -4509,6 +4661,43 @@
     if (btnLeaveRoom) {
       btnLeaveRoom.addEventListener("click", () => {
         leavePomodoroRoom();
+      });
+    }
+
+    const btnCloseRoom = document.getElementById("btnCloseRoom");
+    if (btnCloseRoom) {
+      btnCloseRoom.addEventListener("click", () => {
+        closePomodoroRoom();
+      });
+    }
+
+    const btnModalCloseRoom = document.getElementById("btnModalCloseRoom");
+    if (btnModalCloseRoom) {
+      btnModalCloseRoom.addEventListener("click", () => {
+        closePomodoroRoom();
+        closeModal("modalRoomConnect");
+      });
+    }
+
+    const btnModalLeaveRoom = document.getElementById("btnModalLeaveRoom");
+    if (btnModalLeaveRoom) {
+      btnModalLeaveRoom.addEventListener("click", () => {
+        leavePomodoroRoom();
+        closeModal("modalRoomConnect");
+      });
+    }
+
+    const btnCopyRoomLinkBanner = document.getElementById("btnCopyRoomLinkBanner");
+    if (btnCopyRoomLinkBanner) {
+      btnCopyRoomLinkBanner.addEventListener("click", () => {
+        copyRoomInviteLink();
+      });
+    }
+
+    const btnCopyInviteLinkModal = document.getElementById("btnCopyInviteLinkModal");
+    if (btnCopyInviteLinkModal) {
+      btnCopyInviteLinkModal.addEventListener("click", () => {
+        copyRoomInviteLink();
       });
     }
 

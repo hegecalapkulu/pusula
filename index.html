@@ -574,12 +574,19 @@
               <div class="room-banner-left">
                 <span class="room-status-dot offline" id="roomStatusDot"></span>
                 <span class="room-status-text" id="roomStatusText">Tek Başına Çalışma Modu</span>
+                <div class="room-participants-bar hidden" id="roomParticipantsBar"></div>
               </div>
               <div class="room-banner-right">
                 <button type="button" class="btn btn-secondary btn-xs" id="btnOpenRoomModal">
                   👥 Ortak Odaya Bağlan
                 </button>
-                <button type="button" class="btn btn-ghost btn-xs hidden" id="btnLeaveRoom" style="color:var(--danger);">
+                <button type="button" class="btn btn-ghost btn-xs hidden" id="btnCopyRoomLinkBanner" title="Davet Linkini Kopyala">
+                  🔗 Davet Linki
+                </button>
+                <button type="button" class="btn btn-ghost btn-xs hidden" id="btnCloseRoom" style="color:var(--danger);border-color:rgba(220,38,38,0.4);" title="Odayı Kapat">
+                  🛑 Odayı Kapat
+                </button>
+                <button type="button" class="btn btn-ghost btn-xs hidden" id="btnLeaveRoom" style="color:var(--danger);" title="Odadan Ayrıl">
                   🚪 Odadan Ayrıl
                 </button>
               </div>
@@ -1343,15 +1350,34 @@
           </button>
         </div>
 
-        <!-- AKTİF BAĞLANTI DURUMU BİLGİSİ -->
+        <!-- AKTİF BAĞLANTI & KATILIMCILAR BİLGİSİ -->
         <div id="roomActiveInfoBox" class="room-info-active-box hidden">
           <div class="room-code-display-wrap">
             <span style="font-size:12px;color:var(--text-secondary);">Oda Kodun:</span>
             <div class="room-code-badge" id="displayRoomCode">---</div>
-            <button type="button" class="btn btn-ghost btn-xs" id="btnCopyRoomCode" title="Kodu Kopyala">📋 Kopyala</button>
+            <button type="button" class="btn btn-ghost btn-xs" id="btnCopyRoomCode" title="Kodu Kopyala">📋 Kod</button>
+            <button type="button" class="btn btn-secondary btn-xs" id="btnCopyInviteLinkModal" title="Davet Linkini Kopyala">🔗 Davet Linki</button>
           </div>
+          
+          <div style="margin-top:6px;">
+            <div style="font-size:12px;font-weight:700;margin-bottom:6px;color:var(--text-primary);display:flex;align-items:center;justify-content:space-between;">
+              <span>👥 Odadaki Katılımcılar:</span>
+              <span id="roomRoleBadge" style="font-size:11px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,0.08);">Host</span>
+            </div>
+            <div id="roomParticipantsModalList" style="display:flex;flex-direction:column;gap:6px;"></div>
+          </div>
+
           <div class="room-peer-status" id="roomPeerStatus">
             ⏳ Arkadaşının bağlanması bekleniyor...
+          </div>
+
+          <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);display:flex;justify-content:flex-end;gap:8px;">
+            <button type="button" class="btn btn-danger btn-sm hidden" id="btnModalCloseRoom">
+              🛑 Odayı Kapat (Herkesi Çıkar)
+            </button>
+            <button type="button" class="btn btn-ghost btn-sm hidden" id="btnModalLeaveRoom" style="color:var(--danger);">
+              🚪 Odadan Ayrıl
+            </button>
           </div>
         </div>
       </div>
