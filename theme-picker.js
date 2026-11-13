@@ -7,14 +7,22 @@
   var KEY = "pusulapp_renk_temasi";
   var root = document.documentElement;
 
+  // modern: aynı paletin "Modern" görünümdeki (açık, pastel) vurgu rengi — modern.css ile aynı
   var PALETTES = [
-    { id: "pusula", name: "Pusula", color: "#3f6cc4" },
-    { id: "gece", name: "Gece", color: "#6068f0" },
-    { id: "kil", name: "Kil", color: "#c8794f" },
-    { id: "orman", name: "Orman", color: "#5f8f6a" },
-    { id: "erik", name: "Erik", color: "#9a6b9c" },
-    { id: "grafit", name: "Grafit", color: "#8a8780" }
+    { id: "pusula", name: "Pusula", color: "#3f6cc4", modern: "#c4bcf8" },
+    { id: "gece", name: "Gece", color: "#6068f0", modern: "#a9b6ff" },
+    { id: "kil", name: "Kil", color: "#c8794f", modern: "#f2b48f" },
+    { id: "orman", name: "Orman", color: "#5f8f6a", modern: "#93dbb0" },
+    { id: "erik", name: "Erik", color: "#9a6b9c", modern: "#e5a8e3" },
+    { id: "grafit", name: "Grafit", color: "#8a8780", modern: "#cfccd8" }
   ];
+
+  // Görünüm stili: "modern" (varsayılan) | "geleneksel" (önceki görünüm).
+  // Renk paleti ve açık/koyu tercihinden bağımsız bir eksen.
+  var STYLES = ["modern", "geleneksel"];
+  function currentStyle() {
+    return STYLES.indexOf(pref.style) >= 0 ? pref.style : "modern";
+  }
 
   function load() {
     try {
@@ -42,7 +50,7 @@
   }
 
   var CUSTOM_PROPS = ["--accent-rgb", "--accent-primary", "--accent-primary-hover",
-    "--accent-text", "--accent-soft", "--border-focus"];
+    "--accent-text", "--accent-soft", "--border-focus", "--accent-on", "--m-fill"];
 
   function apply(pref) {
     var palette = pref.palette || "pusula";
@@ -55,8 +63,22 @@
       root.style.setProperty("--accent-text", root.getAttribute("data-theme") === "light" ? shade(rgb, -0.1) : shade(rgb, 0.2));
       root.style.setProperty("--accent-soft", "rgba(" + rgb.join(", ") + ", 0.13)");
       root.style.setProperty("--border-focus", pref.custom);
+      // Dolu düğme yazısı: açık renklerde koyu, koyu renklerde beyaz
+      var lum = rgb.map(function (v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+      lum = 0.2126 * lum[0] + 0.7152 * lum[1] + 0.0722 * lum[2];
+      root.style.setProperty("--accent-on", lum > 0.22 ? "#17140f" : "#ffffff");
+      // Modern + açık: dolgu seçilen renkte kalır (--m-fill), yazı/çizgi tonu
+      // açık renklerde okunur olsun diye koyulaştırılır.
+      if (pref.style !== "geleneksel" && root.getAttribute("data-theme") === "light") {
+        var deep = shade(rgb, lum > 0.5 ? -0.6 : lum > 0.25 ? -0.45 : lum > 0.12 ? -0.25 : 0);
+        root.style.setProperty("--m-fill", pref.custom);
+        root.style.setProperty("--accent-primary", deep);
+        root.style.setProperty("--accent-text", deep);
+        root.style.setProperty("--border-focus", deep);
+      }
     }
     root.setAttribute("data-palette", palette);
+    root.setAttribute("data-style", STYLES.indexOf(pref.style) >= 0 ? pref.style : "modern");
   }
 
   var pref = load();
@@ -81,17 +103,42 @@
   function syncSwatches() {
     if (!panel) return;
     var current = pref.palette || "pusula";
+    var modern = currentStyle() === "modern";
     panel.querySelectorAll("[data-palette-id]").forEach(function (s) {
       s.classList.toggle("is-active", s.getAttribute("data-palette-id") === current);
+    });
+    // Nokta renkleri seçili görünümdeki gerçek vurgu rengini göstersin
+    PALETTES.forEach(function (p) {
+      var dot = panel.querySelector('[data-palette-id="' + p.id + '"] .tp-dot');
+      if (dot) dot.style.background = modern ? p.modern : p.color;
     });
     var c = panel.querySelector("#tpCustomColor");
     if (c && pref.custom) c.value = pref.custom;
   }
 
+  function syncStyleButtons() {
+    if (!panel) return;
+    var s = currentStyle();
+    panel.querySelectorAll("[data-style-opt]").forEach(function (b) {
+      var on = b.getAttribute("data-style-opt") === s;
+      b.classList.toggle("is-active", on);
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+  }
+
   function choose(id, custom) {
-    pref = { palette: id, custom: custom || pref.custom };
+    pref = { palette: id, custom: custom || pref.custom, style: pref.style };
     save(pref);
     apply(pref);
+    syncSwatches();
+  }
+
+  function setStyle(style) {
+    if (STYLES.indexOf(style) < 0) return;
+    pref = { palette: pref.palette, custom: pref.custom, style: style };
+    save(pref);
+    apply(pref);
+    syncStyleButtons();
     syncSwatches();
   }
 
@@ -111,6 +158,7 @@
     panel.style.bottom = Math.max(8, window.innerHeight - r.top + 8) + "px";
     btn.setAttribute("aria-expanded", "true");
     syncModeButtons();
+    syncStyleButtons();
     syncSwatches();
   }
 
@@ -146,7 +194,12 @@
     }).join("");
 
     panel.innerHTML =
-      '<div class="tp-head">Görünüm</div>' +
+      '<div class="tp-head" id="tpStyleHead">Görünüm</div>' +
+      '<div class="tp-modes tp-styles" role="group" aria-labelledby="tpStyleHead">' +
+      '<button type="button" class="tp-mode" data-style-opt="modern" aria-pressed="false">Modern</button>' +
+      '<button type="button" class="tp-mode" data-style-opt="geleneksel" aria-pressed="false">Geleneksel</button>' +
+      "</div>" +
+      '<div class="tp-head">Açık / Koyu</div>' +
       '<div class="tp-modes">' +
       '<button type="button" class="tp-mode" data-mode="dark">Koyu</button>' +
       '<button type="button" class="tp-mode" data-mode="light">Açık</button>' +
@@ -165,6 +218,8 @@
     });
     panel.addEventListener("click", function (e) {
       e.stopPropagation();
+      var st = e.target.closest("[data-style-opt]");
+      if (st) return setStyle(st.getAttribute("data-style-opt"));
       var m = e.target.closest("[data-mode]");
       if (m) return setMode(m.getAttribute("data-mode"));
       var s = e.target.closest(".tp-grid [data-palette-id]");

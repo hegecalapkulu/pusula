@@ -369,12 +369,15 @@
         }
       ],
       focusStats: {},
+      // Ortak seri: başka biriyle aynı odada ders oturumu tamamlanan art arda günler
+      roomStreak: { current: 0, best: 0, lastDay: null },
       dailyNotes: {
         [today]: "Yeni planlayıcı sistemimi kurdum. Amacım kendimi saat saat robot gibi sıkmak değil; neyi neden yaptığımı bilerek, ertelediğimde bile farkındalıkla yöneterek sürdürülebilir bir düzen yakalamak."
       },
       weeklyNotes: {
         [weekMon]: "Bu haftanın ana odağı: Günlük 2-3 temel görevi istikrarlı şekilde tamamlamak ve kısa vadeli okuma hedefimde ivme yakalamak."
-      }
+      },
+      reports: []
     };
   }
 
@@ -408,6 +411,8 @@
     routineTab: "active", // 'active' | 'archived' | 'trashed'
     trashFilter: "all", // 'all' | 'routines' | 'tasks' | 'goals'
     noteFilter: "all", // 'all' | 'task' | 'journal' | 'postpone'
+    compiledNoteFilter: "all", // 'all' | 'daily' | 'weekly' | 'task_goal' | 'reports' | 'quotes'
+    noteSubFilter: "all", // 'all' | 'ai' | 'user'
     searchQuery: "",
     expandedTaskIds: new Set(),
     showOverdueList: false,
@@ -539,9 +544,11 @@
       state.trashedTasks = Array.isArray(loaded.trashedTasks) ? loaded.trashedTasks : [];
       state.trashedGoals = Array.isArray(loaded.trashedGoals) ? loaded.trashedGoals : [];
       state.focusStats = loaded.focusStats || {};
+      state.roomStreak = normalizeRoomStreak(loaded.roomStreak);
       state.dailyNotes = loaded.dailyNotes || {};
       state.weeklyNotes = loaded.weeklyNotes || {};
       state.savedQuotes = Array.isArray(loaded.savedQuotes) ? loaded.savedQuotes : [];
+      state.reports = Array.isArray(loaded.reports) ? loaded.reports : [];
       // Rutinlerde status yoksa 'active' yap
       (state.routines || []).forEach((r) => {
         if (!r.status) r.status = "active";
@@ -840,6 +847,274 @@
     renderNotesView();
     renderInsightsView();
     renderTrashView();
+    renderModernExtras();
+    decorateFigures();
+  }
+
+  // =========================================================
+  // "MODERN" GÖRÜNÜM EKLERİ (yalnızca görünüm)
+  // Modern stilde görünen ek öğeler: Günün Odağı'ndaki istatistik
+  // kartları ve kenar çubuğundaki "Odaktaki Hedefler" listesi.
+  // Hepsi uygulamanın zaten kaydettiği verilerden hesaplanır; .m-only
+  // sınıfı sayesinde "Geleneksel" görünümde gizlidir (modern.css).
+  // =========================================================
+  const ICON_PATHS = {
+    check: '<path d="M5 12.5l4.25 4.25L19 7"/>',
+    timer: '<circle cx="12" cy="13.5" r="7.25"/><path d="M12 9.75v3.75l2.5 1.75M9.75 2.75h4.5"/>',
+    hourglass: '<path d="M6.75 3.25h10.5M6.75 20.75h10.5M7.75 3.25v2.5c0 2.6 4.25 4.1 4.25 6.25s-4.25 3.65-4.25 6.25v2.5M16.25 3.25v2.5c0 2.6-4.25 4.1-4.25 6.25s4.25 3.65 4.25 6.25v2.5"/>',
+    target: '<circle cx="12" cy="12" r="8.25"/><circle cx="12" cy="12" r="4.75"/><circle cx="12" cy="12" r="1.25"/>',
+    flag: '<path d="M5.25 21V4.25M5.25 4.25h11.5l-2 4 2 4H5.25"/>',
+    mountain: '<path d="M2.75 19.25 9.5 8l3.75 6 2.25-3.25 5.75 8.5H2.75z"/>',
+    bolt: '<path d="M13 2.75 5.25 13.5H12l-1 7.75 7.75-10.75H12z"/>',
+    arrowUpRight: '<path d="M7.5 16.5 16.5 7.5M9 7.5h7.5V15"/>',
+    arrowUp: '<path d="M12 19V5M6.5 10.5 12 5l5.5 5.5"/>',
+    arrowDown: '<path d="M12 5v14M6.5 13.5 12 19l5.5-5.5"/>',
+    minus: '<path d="M6 12h12"/>',
+    note: '<path d="M14.75 4.25l5 5L9 20H4v-5z"/><path d="M12.5 6.5l5 5"/>',
+    skip: '<path d="M5.5 6.25v11.5L13.5 12zM13.5 6.25v11.5L21.5 12z"/>',
+    edit: '<path d="M4.75 19.25h4l10-10a2.83 2.83 0 0 0-4-4l-10 10z"/><path d="M13.25 6.75l4 4"/>',
+    trash: '<path d="M4.25 6.75h15.5M9.5 6.75v-2a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M6.5 6.75l.85 12.6a1.5 1.5 0 0 0 1.5 1.4h6.3a1.5 1.5 0 0 0 1.5-1.4l.85-12.6"/>',
+    pin: '<path d="M9 3.75h6M10 3.75v5.5l-3.25 3.5h10.5L14 9.25v-5.5M12 12.75v7.5"/>',
+    calendar: '<rect x="3.75" y="4.75" width="16.5" height="15.5" rx="2.5"/><path d="M3.75 9.5h16.5M8.25 2.75v3.5M15.75 2.75v3.5"/>',
+    inbox: '<path d="M3.75 13.25h4.5l1.5 2.5h4.5l1.5-2.5h4.5"/><path d="M5.75 5.25h12.5l2 8v5.5a1 1 0 0 1-1 1H4.75a1 1 0 0 1-1-1v-5.5z"/>',
+    list: '<rect x="4.25" y="4.25" width="15.5" height="15.5" rx="3"/><path d="M8.25 12l2.5 2.5 5-5"/>',
+    flame: '<path d="M12 21c-3.6 0-6.25-2.55-6.25-6 0-3.25 2.5-5.25 3.75-8 .9 1.6 1.4 2.6 2.75 3.25C12.75 7.5 13.5 5 13 2.75c3.4 2.25 5.25 6.4 5.25 10.25 0 4.5-2.65 8-6.25 8z"/>',
+    repeat: '<path d="M4.75 11.25V9.5a3 3 0 0 1 3-3h11.5M16 3.25l3.25 3.25L16 9.75M19.25 12.75v1.75a3 3 0 0 1-3 3H4.75M8 20.75L4.75 17.5 8 14.25"/>',
+    play: '<path d="M7.25 4.75v14.5L19 12z"/>',
+    pause: '<path d="M8.5 5v14M15.5 5v14"/>',
+    chart: '<path d="M4.75 19.25h14.5M7.5 16v-5M12 16V7M16.5 16v-8"/>',
+    star: '<path d="M12 3.5l2.6 5.3 5.85.85-4.23 4.12 1 5.83L12 16.85 6.78 19.6l1-5.83L3.55 9.65l5.85-.85z"/>',
+    trophy: '<path d="M7.75 4.25h8.5v5a4.25 4.25 0 0 1-8.5 0zM7.75 6.25H4.75v1.5a3 3 0 0 0 3 3M16.25 6.25h3v1.5a3 3 0 0 1-3 3M12 13.5v3.25M8.75 20h6.5M9.75 16.75h4.5"/>',
+    undo: '<path d="M9 14.25 4.75 10 9 5.75"/><path d="M4.75 10h9.5a5 5 0 0 1 0 10H11"/>',
+    link: '<path d="M10 14a3.5 3.5 0 0 0 5 0l3-3a3.5 3.5 0 0 0-5-5l-1 1M14 10a3.5 3.5 0 0 0-5 0l-3 3a3.5 3.5 0 0 0 5 5l1-1"/>',
+    archive: '<rect x="3.75" y="4.25" width="16.5" height="4.5" rx="1"/><path d="M5.25 8.75v10a1 1 0 0 0 1 1h11.5a1 1 0 0 0 1-1v-10M10 12.25h4"/>',
+    restore: '<path d="M4.75 12a7.25 7.25 0 1 0 2.2-5.2M4.75 4.75v4h4"/>',
+    quote: '<path d="M9.25 7.25H6a1.25 1.25 0 0 0-1.25 1.25v3.25A1.25 1.25 0 0 0 6 13h2.5v.5a3 3 0 0 1-3 3M19.25 7.25H16a1.25 1.25 0 0 0-1.25 1.25v3.25A1.25 1.25 0 0 0 16 13h2.5v.5a3 3 0 0 1-3 3"/>'
+  };
+
+  // Küçük çizgi ikon (currentColor). Boyut CSS ile (.ic) ayarlanabilir.
+  function icon(name, size = 14) {
+    const p = ICON_PATHS[name];
+    if (!p) return "";
+    return `<svg class="ic" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${p}</svg>`;
+  }
+
+  // Son günlerin değerlerinden ince, parlayan bir çizgi grafik (SVG)
+  function buildSparkSvg(values, glowClass) {
+    const w = 100;
+    const h = 40;
+    const max = Math.max(1, ...values);
+    const n = values.length;
+    const pts = values.map((v, i) => {
+      const x = n > 1 ? (i / (n - 1)) * w : w;
+      const y = h - 6 - (v / max) * (h - 14);
+      return [x, y];
+    });
+    // Yumuşak eğri (kübik, yatay kontrol noktaları)
+    let d = `M${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)}`;
+    for (let i = 1; i < pts.length; i++) {
+      const [x0, y0] = pts[i - 1];
+      const [x1, y1] = pts[i];
+      const cx = (x0 + x1) / 2;
+      d += ` C${cx.toFixed(2)} ${y0.toFixed(2)}, ${cx.toFixed(2)} ${y1.toFixed(2)}, ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+    }
+    const last = pts[pts.length - 1];
+    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+      <line class="m-spark-base" x1="0" y1="${h - 6}" x2="${w}" y2="${h - 6}" stroke="currentColor" />
+      <g class="${glowClass}"><path class="m-spark-line" d="${d}" stroke="currentColor" /></g>
+      <circle cx="${last[0].toFixed(2)}" cy="${last[1].toFixed(2)}" r="0.01" stroke="currentColor" stroke-width="7" stroke-linecap="round" vector-effect="non-scaling-stroke" class="${glowClass}" />
+    </svg>`;
+  }
+
+  function modernDelta(diff, unitLabel, goodWhenUp, compareLabel) {
+    if (diff === null) {
+      return `<span class="m-delta flat"><i>${icon("minus", 10)}</i><small>${compareLabel}</small></span>`;
+    }
+    const cls = diff === 0 ? "flat" : (diff > 0) === goodWhenUp ? "up" : "down";
+    const arrow = diff === 0 ? "minus" : diff > 0 ? "arrowUp" : "arrowDown";
+    const sign = diff > 0 ? "+" : diff < 0 ? "−" : "±";
+    return `<span class="m-delta ${cls}"><i>${icon(arrow, 10)}</i>${sign}${Math.abs(diff)}${unitLabel} <small>${compareLabel}</small></span>`;
+  }
+
+  function renderModernExtras() {
+    renderModernDailyStats();
+    renderModernSideGoals();
+  }
+
+  function renderModernDailyStats() {
+    const view = document.getElementById("view-daily");
+    if (!view) return;
+    let row = document.getElementById("modernDailyStats");
+    if (!row) {
+      row = document.createElement("div");
+      row.id = "modernDailyStats";
+      row.className = "m-stats-row m-only";
+      row.setAttribute("aria-label", "Özet istatistikler");
+      const quote = document.getElementById("quoteOfTheDayCard");
+      if (quote && quote.nextSibling) view.insertBefore(row, quote.nextSibling);
+      else view.prepend(row);
+      row.addEventListener("click", (e) => {
+        const b = e.target.closest("[data-m-open-view]");
+        if (b) switchView(b.getAttribute("data-m-open-view"));
+      });
+    }
+
+    const sel = uiState.selectedDateISO || getTodayISO();
+    const today = getTodayISO();
+    const dayTasks = (iso) => state.tasks.filter((t) => t.scope === "day" && t.date === iso);
+
+    // 1) Seçili günün görevleri: tamamlanan / planlanan, son 7 gün tamamlanan
+    const selTasks = dayTasks(sel);
+    const selDone = selTasks.filter((t) => t.completed).length;
+    const prevDone = dayTasks(addDaysISO(sel, -1)).filter((t) => t.completed).length;
+    const doneSeries = [];
+    for (let i = 6; i >= 0; i--) {
+      doneSeries.push(dayTasks(addDaysISO(sel, -i)).filter((t) => t.completed).length);
+    }
+
+    // 2) Odak: son 7 gün toplam dakika (zamanlayıcı kayıtları), önceki 7 günle kıyas
+    const stats = state.focusStats || {};
+    const minsOn = (iso) => (stats[iso] && Number(stats[iso].minutes)) || 0;
+    const focusSeries = [];
+    let focus7 = 0;
+    let focusPrev7 = 0;
+    for (let i = 6; i >= 0; i--) {
+      const m = minsOn(addDaysISO(today, -i));
+      focusSeries.push(m);
+      focus7 += m;
+    }
+    for (let i = 13; i >= 7; i--) focusPrev7 += minsOn(addDaysISO(today, -i));
+
+    // 3) Erteleme: son 7 gündeki erteleme kayıtları (postponeHistory.at)
+    const postponeCountOn = {};
+    state.tasks.forEach((t) => {
+      (t.postponeHistory || []).forEach((h) => {
+        if (h && h.at) postponeCountOn[h.at] = (postponeCountOn[h.at] || 0) + 1;
+      });
+    });
+    const postSeries = [];
+    let post7 = 0;
+    let postPrev7 = 0;
+    for (let i = 6; i >= 0; i--) {
+      const c = postponeCountOn[addDaysISO(today, -i)] || 0;
+      postSeries.push(c);
+      post7 += c;
+    }
+    for (let i = 13; i >= 7; i--) postPrev7 += postponeCountOn[addDaysISO(today, -i)] || 0;
+
+    const selLabel = sel === today ? "Bugün" : formatShortTR(sel);
+    const card = (o) => `
+      <div class="m-stat">
+        <div class="m-stat-top">
+          <span class="m-tile m-tile-lg ${o.tint}">${icon(o.icon, 19)}</span>
+          <div>
+            <div class="m-label-cap">${o.cap}</div>
+            <div class="m-label-main">${o.main}</div>
+          </div>
+          <button type="button" class="m-round-btn" data-m-open-view="${o.view}" title="${o.viewTitle}" aria-label="${o.viewTitle}">${icon("arrowUpRight", 14)}</button>
+        </div>
+        <div class="m-label-cap m-stat-k">${o.k}</div>
+        <div class="m-big">${o.big}</div>
+        ${o.delta}
+        <div class="m-spark ${o.sparkColor}">${buildSparkSvg(o.series, o.glow)}${o.tip ? `<span class="m-spark-tip">${o.tip}</span>` : ""}</div>
+      </div>`;
+
+    row.innerHTML = [
+      card({
+        tint: "m-tint-accent", icon: "check", cap: "Günün Görevleri", main: "Tamamlanan",
+        view: "weekly", viewTitle: "Haftalık Plana git",
+        k: `${selLabel} · tamamlanan / planlanan`,
+        big: `${selDone}<span class="d">/${selTasks.length}</span>`,
+        delta: modernDelta(selDone - prevDone, "", true, "önceki güne göre"),
+        series: doneSeries, glow: "m-glow-accent", sparkColor: "m-glow-accent",
+        tip: ""
+      }),
+      card({
+        tint: "m-tint-blue", icon: "timer", cap: "Zamanlayıcı", main: "Son 7 gün odak",
+        view: "timer", viewTitle: "Zamanlayıcıya git",
+        k: "Toplam odak süresi",
+        big: `${focus7}<span class="u">dk</span>`,
+        delta: focus7 === 0 && focusPrev7 === 0
+          ? modernDelta(null, "", true, "henüz oturum kaydı yok")
+          : modernDelta(focus7 - focusPrev7, " dk", true, "önceki 7 güne göre"),
+        series: focusSeries, glow: "m-glow-accent", sparkColor: "m-glow-accent",
+        tip: ""
+      }),
+      card({
+        tint: "m-tint-coral", icon: "hourglass", cap: "Erteleme Analizi", main: "Ertelenen",
+        view: "insights", viewTitle: "Erteleme Analizine git",
+        k: "Son 7 günde yapılan erteleme",
+        big: `${post7}<span class="u">kez</span>`,
+        delta: post7 === 0 && postPrev7 === 0
+          ? modernDelta(null, "", false, "erteleme yok")
+          : modernDelta(post7 - postPrev7, "", false, "önceki 7 güne göre"),
+        series: postSeries, glow: "m-glow-coral", sparkColor: "m-glow-coral",
+        tip: ""
+      })
+    ].join("");
+  }
+
+  function renderModernSideGoals() {
+    const nav = document.querySelector(".sidebar .nav-menu");
+    if (!nav) return;
+    let box = document.getElementById("modernSideGoals");
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "modernSideGoals";
+      box.className = "m-side-goals m-only";
+      nav.insertAdjacentElement("afterend", box);
+      box.addEventListener("click", (e) => {
+        if (e.target.closest("[data-m-goal]")) switchView("goals");
+      });
+    }
+    const active = state.goals
+      .filter((g) => !g.completed)
+      .slice()
+      .sort((a, b) => String(a.targetDate || "9999").localeCompare(String(b.targetDate || "9999")));
+    if (active.length === 0) {
+      box.innerHTML = "";
+      box.style.display = "none";
+      return;
+    }
+    box.style.display = "";
+    const tints = ["m-tint-lilac", "m-tint-blue", "m-tint-green"];
+    box.innerHTML = `
+      <div class="m-side-goals-head">${icon("flag", 18)}<span>Odaktaki Hedefler</span><span class="m-pill-mini">${active.length}</span></div>
+      ${active
+        .slice(0, 3)
+        .map((g, i) => `
+        <button type="button" class="m-side-goal" data-m-goal="${g.id}" title="Hedef Pusulası'nda gör">
+          <span class="m-tile ${tints[i % tints.length]}">${icon(g.horizon === "long" ? "mountain" : "bolt", 15)}</span>
+          <span class="m-side-goal-text">
+            <span class="m-side-goal-cap">${g.horizon === "long" ? "Uzun vadeli" : "Kısa vadeli"}${g.targetDate ? ` · ${formatShortTR(g.targetDate)}` : ""}</span>
+            <span class="m-side-goal-title">${escapeHtml(g.title)}</span>
+          </span>
+        </button>`)
+        .join("")}
+    `;
+  }
+
+  // Yalnızca görünüm: "0/2", "%32", "45 dk" gibi değerlerde sayıyı öne çıkarır,
+  // birim/payda kısmını (fig-unit) CSS ile küçük ve soluk gösterir. Metin aynı kalır.
+  function decorateFigures(scope = document) {
+    const FIGURE_SELECTOR =
+      "#statTodayRatio, #statWeekRatio, #statGoalsAvg, #statTimerSessionsToday, #statTimerMinutesToday, #statRoomStreak, .summary-kpi-val";
+    scope.querySelectorAll(FIGURE_SELECTOR).forEach((el) => {
+      if (el.children.length) return; // zaten bölünmüş ya da özel içerik
+      const text = el.textContent;
+      if (!/\d/.test(text)) return;
+      const frag = document.createDocumentFragment();
+      const re = /(\/\s*\d[\d.,]*)|(\d[\d.,:]*)|([^\d/]+|\/)/g;
+      let m;
+      while ((m = re.exec(text))) {
+        const span = document.createElement("span");
+        span.className = m[2] ? "fig-num" : "fig-unit";
+        span.textContent = m[0];
+        frag.appendChild(span);
+      }
+      el.textContent = "";
+      el.appendChild(frag);
+    });
   }
 
   function populateGoalDropdowns() {
@@ -928,8 +1203,9 @@
       state.tasks.filter((t) => t.note && t.note.trim()).length +
       state.goals.filter((g) => g.why && g.why.trim()).length;
     const savedQuotesCount = (state.savedQuotes || []).length;
+    const reportsCount = (state.reports || []).length;
     const totalCompiledNotesCount =
-      dailyNotesCount + weeklyNotesCount + taskGoalNotesCount + savedQuotesCount;
+      dailyNotesCount + weeklyNotesCount + taskGoalNotesCount + reportsCount + savedQuotesCount;
 
     document.getElementById("statTodayRatio").textContent = `${todayDone}/${todayTasks.length}`;
     document.getElementById("statWeekRatio").textContent = `%${weekPct}`;
@@ -982,7 +1258,7 @@
     const badgeEl = document.getElementById("quoteDayOfYearBadge");
 
     if (badgeEl) {
-      badgeEl.textContent = `📜 GÜNÜN SÖZÜ • YILIN ${dayOfYear}. GÜNÜ (${AUTHENTIC_QUOTES.length} GERÇEK ALINTI ARŞİVİ)`;
+      badgeEl.textContent = `GÜNÜN SÖZÜ • YILIN ${dayOfYear}. GÜNÜ (${AUTHENTIC_QUOTES.length} GERÇEK ALINTI ARŞİVİ)`;
     }
     if (textEl) textEl.textContent = `"${q.text}"`;
     if (authorEl) authorEl.textContent = `— ${q.author}`;
@@ -997,7 +1273,7 @@
     const listEl = document.getElementById("savedQuotesList");
     if (listEl) {
       if (savedList.length === 0) {
-        listEl.innerHTML = `<div style="font-size:12px;color:var(--text-muted);padding:6px 0;">Henüz kaydettiğin bir söz yok. Yukarıdaki "⭐ Nota & Koleksiyona Kaydet" butonuna bastığında burada listelenir.</div>`;
+        listEl.innerHTML = `<div style="font-size:12px;color:var(--text-muted);padding:6px 0;">Henüz kaydettiğin bir söz yok. Yukarıdaki "Nota & Koleksiyona Kaydet" butonuna bastığında burada listelenir.</div>`;
       } else {
         listEl.innerHTML = savedList
           .map(
@@ -1025,7 +1301,7 @@
   // =========================================================
   function createTaskCardElement(task, options = {}) {
     const card = document.createElement("div");
-    card.className = `task-card ${task.completed ? "completed" : ""}`;
+    card.className = `task-card ${task.completed ? "completed" : ""} ${task.priority === "postponed" || (task.postponeCount || 0) > 0 ? "is-postponed" : ""}`;
 
     const goal = task.goalId ? getGoalById(task.goalId) : null;
     const isExpanded = uiState.expandedTaskIds.has(task.id);
@@ -1034,15 +1310,15 @@
 
     let priorityBadge = "";
     if (task.priority === "high") {
-      priorityBadge = `<span class="badge badge-priority-high">🔴 Öncelikli</span>`;
+      priorityBadge = `<span class="badge badge-priority-high"><span class="badge-dot" aria-hidden="true"></span>Öncelikli</span>`;
     } else if (task.priority === "postponed") {
-      priorityBadge = `<span class="badge badge-priority-postponed">⏳ Ertelenmiş</span>`;
+      priorityBadge = `<span class="badge badge-priority-postponed"><span class="badge-dot" aria-hidden="true"></span>Ertelenmiş</span>`;
     } else if (task.priority === "low") {
-      priorityBadge = `<span class="badge badge-priority-low">🟢 Esnek</span>`;
+      priorityBadge = `<span class="badge badge-priority-low"><span class="badge-dot" aria-hidden="true"></span>Esnek</span>`;
     }
 
     const goalBadge = goal
-      ? `<span class="badge badge-goal" data-jump-goal="${goal.id}" title="Hedefe git">🎯 ${escapeHtml(goal.title)}</span>`
+      ? `<span class="badge badge-goal" data-jump-goal="${goal.id}" title="Hedefe git">${icon("target", 13)}${escapeHtml(goal.title)}</span>`
       : "";
 
     const categoryBadge = task.category
@@ -1051,29 +1327,29 @@
 
     const scopeBadge =
       task.scope === "week"
-        ? `<span class="badge badge-weekpool">🧺 Haftalık Esnek</span>`
+        ? `<span class="badge badge-weekpool">${icon("inbox", 13)}Haftalık Esnek</span>`
         : options.showDate && task.date
-        ? `<span class="badge badge-category">📅 ${formatShortTR(task.date)}</span>`
+        ? `<span class="badge badge-category">${icon("calendar", 13)}${formatShortTR(task.date)}</span>`
         : "";
 
     const postponeBadge =
       (task.postponeCount || 0) > 0
-        ? `<span class="badge badge-postponed" title="Bu görev ${task.postponeCount} kez ertelendi">⏳ ${task.postponeCount}x ertelendi</span>`
+        ? `<span class="badge badge-postponed" title="Bu görev ${task.postponeCount} kez ertelendi">${icon("hourglass", 13)}${task.postponeCount}x ertelendi</span>`
         : "";
 
     const subtasksBadge =
       subtasks.length > 0
-        ? `<span class="badge badge-category">☑️ ${doneSubtasks}/${subtasks.length} adım</span>`
+        ? `<span class="badge badge-category">${icon("list", 13)}${doneSubtasks}/${subtasks.length} adım</span>`
         : "";
 
     const focusBadge =
       (task.focusedMinutes || 0) > 0
-        ? `<span class="badge badge-streak">⏱️ ${task.focusedMinutes} dk odaklanıldı</span>`
+        ? `<span class="badge badge-streak">${icon("timer", 13)}${task.focusedMinutes} dk odaklanıldı</span>`
         : "";
 
     const assignToDayBtn =
       task.scope === "week" && options.allowAssignToSelectedDay
-        ? `<button class="action-btn" data-action="assign-day" data-id="${task.id}" title="Seçili güne (${formatShortTR(uiState.selectedDateISO)}) ata">📌 Güne Al</button>`
+        ? `<button class="action-btn" data-action="assign-day" data-id="${task.id}" title="Seçili güne (${formatShortTR(uiState.selectedDateISO)}) ata">${icon("pin", 13)} Güne Al</button>`
         : "";
 
     card.innerHTML = `
@@ -1099,7 +1375,7 @@
 
           ${
             task.note && !isExpanded
-              ? `<div class="task-note-preview" data-action="toggle-expand" data-id="${task.id}" title="Notu düzenlemek için tıkla">📝 ${escapeHtml(task.note)}</div>`
+              ? `<div class="task-note-preview" data-action="toggle-expand" data-id="${task.id}" title="Notu düzenlemek için tıkla">${escapeHtml(task.note)}</div>`
               : ""
           }
         </div>
@@ -1107,15 +1383,15 @@
         <div class="task-actions">
           ${assignToDayBtn}
           <button class="action-btn" data-action="toggle-expand" data-id="${task.id}" title="Altına Not Yaz / Alt Adımlar">
-            📝 ${isExpanded ? "Kapat" : "Not"}
+            ${icon("note", 13)} ${isExpanded ? "Kapat" : "Not"}
           </button>
           ${
             !task.completed && task.scope !== "week"
-              ? `<button class="action-btn postpone-btn" data-action="postpone-task" data-id="${task.id}" title="Görevi Ertele">⏭️ Ertele</button>`
+              ? `<button class="action-btn postpone-btn" data-action="postpone-task" data-id="${task.id}" title="Görevi Ertele">${icon("skip", 13)} Ertele</button>`
               : ""
           }
-          <button class="action-btn" data-action="edit-task" data-id="${task.id}" title="Düzenle">✏️</button>
-          <button class="action-btn" data-action="delete-task" data-id="${task.id}" title="Sil">🗑️</button>
+          <button class="action-btn" data-action="edit-task" data-id="${task.id}" title="Düzenle" aria-label="Düzenle">${icon("edit", 14)}</button>
+          <button class="action-btn" data-action="delete-task" data-id="${task.id}" title="Sil" aria-label="Sil">${icon("trash", 14)}</button>
         </div>
       </div>
 
@@ -1124,12 +1400,12 @@
           ? `
         <div class="task-drawer">
           <div class="task-inline-note-box">
-            <label>📝 Görev Altı Notu (Otomatik kaydedilir)</label>
+            <label>Görev Altı Notu (Otomatik kaydedilir)</label>
             <textarea data-inline-note-id="${task.id}" placeholder="Bu görevle ilgili ilerleme notun, düşüncelerin veya bağlantılar...">${escapeHtml(task.note || "")}</textarea>
           </div>
 
           <div class="subtasks-inline">
-            <label style="font-size:11.5px;font-weight:600;color:var(--text-secondary);">☑️ Alt Adımlar</label>
+            <label style="font-size:11.5px;font-weight:600;color:var(--text-secondary);">Alt Adımlar</label>
             ${subtasks
               .map(
                 (st, idx) => `
@@ -1150,7 +1426,7 @@
             task.postponeHistory && task.postponeHistory.length > 0
               ? `
             <div class="postpone-history-box">
-              <strong>⏳ Erteleme Geçmişi (${task.postponeHistory.length} kez)</strong>
+              <strong>Erteleme Geçmişi (${task.postponeHistory.length} kez)</strong>
               ${task.postponeHistory
                 .map(
                   (h) => `
@@ -1258,11 +1534,11 @@
                 <span class="task-title-text">${escapeHtml(r.title)}</span>
               </div>
               <div class="task-badges">
-                <span class="badge badge-streak">🔥 ${streak} gün seri</span>
-                <span class="badge badge-category">🔁 ${getRoutineFreqLabel(r)}</span>
-                ${goal ? `<span class="badge badge-goal" data-jump-goal="${goal.id}">🎯 ${escapeHtml(goal.title)}</span>` : ""}
+                <span class="badge badge-streak">${icon("flame", 13)}${streak} gün seri</span>
+                <span class="badge badge-category">${icon("repeat", 13)}${getRoutineFreqLabel(r)}</span>
+                ${goal ? `<span class="badge badge-goal" data-jump-goal="${goal.id}">${icon("target", 13)}${escapeHtml(goal.title)}</span>` : ""}
               </div>
-              ${r.note ? `<div class="task-note-preview">📌 ${escapeHtml(r.note)}</div>` : ""}
+              ${r.note ? `<div class="task-note-preview">${escapeHtml(r.note)}</div>` : ""}
             </div>
           </div>
         `;
@@ -1386,7 +1662,7 @@
           "padding:10px 12px;background:var(--bg-input);border:1px solid var(--border-subtle);border-radius:8px;margin-bottom:8px;cursor:pointer;";
         item.innerHTML = `
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;">
-            <strong style="font-size:12.5px;">${g.horizon === "long" ? "🏔️" : "⚡"} ${escapeHtml(g.title)}</strong>
+            <strong style="font-size:12.5px;">${icon(g.horizon === "long" ? "mountain" : "bolt", 13)} ${escapeHtml(g.title)}</strong>
             <span style="font-size:11.5px;font-weight:700;color:var(--accent-primary);">%${prog}</span>
           </div>
           <div class="progress-track" style="height:6px;margin-bottom:5px;">
@@ -1505,6 +1781,160 @@
 
       gridEl.appendChild(col);
     });
+
+    renderWeeklySummary(weekMon);
+  }
+
+  // ---------- Haftalık Özet ----------
+  // Yalnızca uygulamanın zaten kaydettiği verilerden üretilir; güvenilir
+  // türetilemeyen sayılar gösterilmez.
+  function computeWeeklySummary(weekMon) {
+    const today = getTodayISO();
+    const days = getWeekDaysISO(weekMon);
+    const weekEnd = days[6];
+    const inWeek = (iso) => typeof iso === "string" && iso >= weekMon && iso <= weekEnd;
+    const stats = state.focusStats || {};
+
+    // 1) Odak süresi
+    let minutes = 0;
+    let sessions = 0;
+    let untrackedGoalMinutes = 0; // hedef dağılımı kaydı başlamadan önceki günler
+    const byGoal = {};
+    days.forEach((d) => {
+      const st = stats[d];
+      if (!st || typeof st !== "object") return;
+      const m = Number(st.minutes) || 0;
+      minutes += m;
+      sessions += Number(st.sessions) || 0;
+      if (st.byGoal && typeof st.byGoal === "object") {
+        Object.keys(st.byGoal).forEach((gid) => {
+          const v = Number(st.byGoal[gid]) || 0;
+          if (v > 0) byGoal[gid] = (byGoal[gid] || 0) + v;
+        });
+      } else if (m > 0) {
+        untrackedGoalMinutes += m;
+      }
+    });
+    const goalNames = {};
+    (state.goals || []).forEach((g) => { goalNames[g.id] = g.title; });
+    const topGoals = Object.keys(byGoal)
+      .map((gid) => ({ title: goalNames[gid] || "Silinmiş hedef", minutes: byGoal[gid] }))
+      .sort((a, b) => b.minutes - a.minutes)
+      .slice(0, 3);
+
+    // 2) Görevler: bu haftanın günlerine atanmış + haftalık havuz
+    const weekTasks = (state.tasks || []).filter(
+      (t) => (t.scope === "day" && inWeek(t.date)) || (t.scope === "week" && t.weekMonday === weekMon)
+    );
+    const tasksDone = weekTasks.filter((t) => t.completed).length;
+
+    // 3) Rutin uyumu: aktif rutinlerin, haftanın bugüne kadarki planlı günleri.
+    // Başlangıç tarihi bilinmeyen rutinde ilk tamamlama günü alt sınır kabul edilir.
+    let routineDue = 0;
+    let routineDone = 0;
+    (state.routines || []).forEach((r) => {
+      if (r.status && r.status !== "active") return;
+      const comp = r.completions || {};
+      let start = r.createdAt || Object.keys(comp).filter((k) => comp[k]).sort()[0];
+      if (!start) return;
+      days.forEach((d) => {
+        if (d > today || d < start) return;
+        if (!isRoutineScheduledForDate(r, d)) return;
+        routineDue++;
+        if (comp[d]) routineDone++;
+      });
+    });
+
+    // 4) Bu hafta en çok ertelenenler (erteleme kaydının tarihine göre)
+    const postponed = [];
+    (state.tasks || []).forEach((t) => {
+      const n = (t.postponeHistory || []).filter((h) => h && inWeek(h.at)).length;
+      if (n > 0) postponed.push({ title: t.title, count: n });
+    });
+    postponed.sort((a, b) => b.count - a.count);
+
+    return {
+      minutes, sessions, untrackedGoalMinutes, topGoals,
+      tasksPlanned: weekTasks.length, tasksDone,
+      routineDue, routineDone,
+      postponedTop: postponed.slice(0, 3),
+      postponedTotal: postponed.reduce((a, p) => a + p.count, 0),
+      isFuture: weekMon > today
+    };
+  }
+
+  function formatMinutesTR(m) {
+    if (m < 60) return `${m} dk`;
+    const h = Math.floor(m / 60);
+    const r = m % 60;
+    return r ? `${h} sa ${r} dk` : `${h} sa`;
+  }
+
+  function renderWeeklySummary(weekMon) {
+    const body = document.getElementById("weeklySummaryBody");
+    if (!body) return;
+    const sub = document.getElementById("weeklySummarySubtitle");
+    const isThisWeek = weekMon === getWeekMondayISO(getTodayISO());
+    if (sub) {
+      sub.textContent = isThisWeek
+        ? "Bu haftanın şu ana kadarki odak, görev, rutin ve erteleme kayıtlarından"
+        : `${formatWeekRangeTR(weekMon)} haftasının kayıtlarından`;
+    }
+    const s = computeWeeklySummary(weekMon);
+    const hasAny = s.minutes > 0 || s.tasksPlanned > 0 || s.routineDue > 0 || s.postponedTotal > 0;
+    if (!hasAny) {
+      body.innerHTML = `<div class="empty-state">${s.isFuture
+        ? "Bu hafta henüz başlamadı. Hafta ilerledikçe özet burada birikecek."
+        : "Bu hafta için kayıtlı odak oturumu, görev veya rutin verisi yok."}</div>`;
+      return;
+    }
+
+    const kpi = (label, val, hint = "") => `
+      <div class="summary-kpi-card">
+        <div class="summary-kpi-label">${label}</div>
+        <div class="summary-kpi-val">${val}</div>
+        ${hint ? `<div class="weekly-summary-hint">${hint}</div>` : ""}
+      </div>`;
+
+    const kpis = [
+      kpi(`${icon("timer", 15)}Toplam Odak`, s.minutes > 0 ? formatMinutesTR(s.minutes) : "—",
+        s.minutes > 0 ? `${s.sessions} oturum` : "Kayıtlı oturum yok"),
+      kpi(`${icon("list", 15)}Görevler`, s.tasksPlanned > 0 ? `${s.tasksDone} / ${s.tasksPlanned}` : "—",
+        s.tasksPlanned > 0 ? `%${Math.round((s.tasksDone / s.tasksPlanned) * 100)} tamamlandı · bu haftaya atanmış` : "Bu haftaya görev atanmamış"),
+      kpi(`${icon("repeat", 15)}Rutin Uyumu`, s.routineDue > 0 ? `%${Math.round((s.routineDone / s.routineDue) * 100)}` : "—",
+        s.routineDue > 0 ? `${s.routineDone} / ${s.routineDue} planlı gün` : "Bu hafta planlı rutin günü yok"),
+      kpi(`${icon("hourglass", 15)}Erteleme`, s.postponedTotal > 0 ? `${s.postponedTotal} kez` : "0",
+        s.postponedTotal > 0 ? "bu hafta yapılan ertelemeler" : "Bu hafta erteleme yok")
+    ].join("");
+
+    let goalsHtml;
+    if (s.topGoals.length > 0) {
+      goalsHtml = s.topGoals.map((g) =>
+        `<div class="weekly-summary-row"><span>${escapeHtml(g.title)}</span><span>${formatMinutesTR(g.minutes)}</span></div>`
+      ).join("");
+      if (s.untrackedGoalMinutes > 0) {
+        goalsHtml += `<div class="weekly-summary-note">Hedef dağılımı kaydı başlamadan önceki ${formatMinutesTR(s.untrackedGoalMinutes)} dahil değil.</div>`;
+      }
+    } else if (s.minutes > 0 && s.untrackedGoalMinutes >= s.minutes) {
+      goalsHtml = `<div class="weekly-summary-note">Bu haftanın oturumları için hedef bazlı süre kaydı yok (bu kayıt yeni eklendi; bundan sonraki oturumlarda görünecek).</div>`;
+    } else if (s.minutes > 0) {
+      goalsHtml = `<div class="weekly-summary-note">Bu hafta odak oturumları hedefe bağlı bir görevle eşleşmedi. Zamanlayıcıda görev seçersen burada görünür.</div>`;
+    } else {
+      goalsHtml = `<div class="weekly-summary-note">Bu hafta odak oturumu kaydı yok.</div>`;
+    }
+
+    const postponedHtml = s.postponedTop.length > 0
+      ? s.postponedTop.map((p) =>
+          `<div class="weekly-summary-row"><span>${escapeHtml(p.title)}</span><span>${p.count}x</span></div>`
+        ).join("")
+      : `<div class="weekly-summary-note">Bu hafta ertelenen görev yok. 👏</div>`;
+
+    body.innerHTML = `
+      <div class="weekly-summary-kpis">${kpis}</div>
+      <div class="weekly-summary-lists">
+        <div class="weekly-summary-list"><h5>En çok odaklanılan hedefler</h5>${goalsHtml}</div>
+        <div class="weekly-summary-list"><h5>En çok ertelenenler</h5>${postponedHtml}</div>
+      </div>`;
   }
 
   // =========================================================
@@ -1622,9 +2052,9 @@
         div.style.cssText = "padding:10px 12px;background:var(--bg-input);border:1px solid var(--border-subtle);border-radius:8px;";
         div.innerHTML = `
           <div style="display:flex;justify-content:space-between;align-items:center;">
-            <strong style="font-size:12.5px;">${g.horizon === "long" ? "🏔️" : "⚡"} ${escapeHtml(g.title)}</strong>
+            <strong style="font-size:12.5px;">${icon(g.horizon === "long" ? "mountain" : "bolt", 13)} ${escapeHtml(g.title)}</strong>
             <span class="badge ${isDeadlineToday ? "badge-priority-high" : "badge-category"}">
-              ${isDeadlineToday ? "🎯 VADE SONU BUGÜN" : `Vade: ${formatShortTR(g.targetDate)}`}
+              ${isDeadlineToday ? "VADE SONU BUGÜN" : `Vade: ${formatShortTR(g.targetDate)}`}
             </span>
           </div>
           <div class="progress-track" style="height:6px;margin-top:6px;">
@@ -1671,14 +2101,14 @@
       // Hedef Vade Sonu varsa en üstte göster
       deadlineGoals.forEach((g) => {
         pillsHtml.push(
-          `<div class="cal-pill-item goal-deadline" title="Hedef Vade Bitişi: ${escapeHtml(g.title)}">🎯 ${escapeHtml(g.title)}</div>`
+          `<div class="cal-pill-item goal-deadline" title="Hedef Vade Bitişi: ${escapeHtml(g.title)}">${escapeHtml(g.title)}</div>`
         );
       });
 
       // Görevleri göster
       dayTasks.forEach((t) => {
         const cls = t.completed ? "done" : (t.postponeCount || 0) > 0 ? "postponed" : "";
-        const icon = t.completed ? "✓" : (t.postponeCount || 0) > 0 ? "⏳" : "•";
+        const icon = t.completed ? "✓" : (t.postponeCount || 0) > 0 ? "↻" : "•";
         pillsHtml.push(
           `<div class="cal-pill-item ${cls}" title="${escapeHtml(t.title)}">${icon} ${escapeHtml(t.title)}</div>`
         );
@@ -1692,8 +2122,8 @@
         <div class="cal-cell-top">
           <span class="cal-cell-num">${c.dayNum}</span>
           <div class="cal-cell-indicators">
-            ${hasNote ? `<span title="Günlük notu var">📓</span>` : ""}
-            ${dueRoutines.length > 0 ? `<span style="color:var(--text-muted);font-size:10px;" title="Tamamlanan Rutinler">🔁${doneRoutinesCount}/${dueRoutines.length}</span>` : ""}
+            ${hasNote ? `<span class="cal-note-dot" title="Günlük notu var" aria-label="Günlük notu var"></span>` : ""}
+            ${dueRoutines.length > 0 ? `<span style="color:var(--text-muted);font-size:10px;" title="Tamamlanan Rutinler">${icon("repeat", 11)}${doneRoutinesCount}/${dueRoutines.length}</span>` : ""}
           </div>
         </div>
         <div class="cal-cell-items">
@@ -1732,7 +2162,7 @@
       gBanner.style.cssText =
         "padding:10px 12px;background:var(--purple-soft);border:1px solid var(--purple);border-radius:8px;font-size:12.5px;";
       gBanner.innerHTML = `
-        <strong>🎯 Hedef Vade Günü:</strong> ${escapeHtml(g.title)}
+        <strong>Hedef Vade Günü:</strong> ${escapeHtml(g.title)}
         <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px;">İlerleme: %${calculateGoalProgress(g)}</div>
       `;
       containerEl.appendChild(gBanner);
@@ -1742,7 +2172,7 @@
     const dayTasks = state.tasks.filter((t) => t.scope === "day" && t.date === isoDate);
     const tasksHeader = document.createElement("div");
     tasksHeader.style.cssText = "font-size:12px;font-weight:700;color:var(--text-secondary);margin-top:4px;";
-    tasksHeader.textContent = `✅ Günün Görevleri (${dayTasks.filter((t) => t.completed).length}/${dayTasks.length})`;
+    tasksHeader.textContent = `Günün Görevleri (${dayTasks.filter((t) => t.completed).length}/${dayTasks.length})`;
     containerEl.appendChild(tasksHeader);
 
     if (dayTasks.length === 0) {
@@ -1764,7 +2194,7 @@
     if (dueRoutines.length > 0) {
       const rHeader = document.createElement("div");
       rHeader.style.cssText = "font-size:12px;font-weight:700;color:var(--text-secondary);margin-top:8px;";
-      rHeader.textContent = `🔁 Günün Rutinleri`;
+      rHeader.textContent = `Günün Rutinleri`;
       containerEl.appendChild(rHeader);
 
       dueRoutines.forEach((r) => {
@@ -1779,7 +2209,7 @@
             </button>
             <div class="task-body">
               <span class="task-title-text" style="font-size:13px;">${escapeHtml(r.title)}</span>
-              <span class="badge badge-streak" style="margin-left:6px;">🔥 ${calculateRoutineStreak(r)}</span>
+              <span class="badge badge-streak" style="margin-left:6px;">${icon("flame", 13)}${calculateRoutineStreak(r)}</span>
             </div>
           </div>
         `;
@@ -1793,7 +2223,7 @@
     const existingNote = (state.dailyNotes && state.dailyNotes[isoDate]) || "";
     noteWrapper.innerHTML = `
       <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">
-        📓 ${formatShortTR(isoDate)} Günlük Notu
+        ${formatShortTR(isoDate)} Günlük Notu
       </div>
       <textarea
         class="daily-note-textarea"
@@ -1830,19 +2260,19 @@
 
     document.getElementById("calYearSummaryStrip").innerHTML = `
       <div class="summary-kpi-card">
-        <div class="summary-kpi-label">📅 ${year} Yılı Planlı Görevler</div>
+        <div class="summary-kpi-label">${icon("calendar", 15)}${year} Yılı Planlı Görevler</div>
         <div class="summary-kpi-val">${yearTasks.length}</div>
       </div>
       <div class="summary-kpi-card">
-        <div class="summary-kpi-label">✅ Tamamlanan Görevler</div>
+        <div class="summary-kpi-label">${icon("list", 15)}Tamamlanan Görevler</div>
         <div class="summary-kpi-val" style="color:var(--success);">${yearDone}</div>
       </div>
       <div class="summary-kpi-card">
-        <div class="summary-kpi-label">🎯 ${year} Yılı Hedefleri</div>
+        <div class="summary-kpi-label">${icon("target", 15)}${year} Yılı Hedefleri</div>
         <div class="summary-kpi-val">${yearGoals.length}</div>
       </div>
       <div class="summary-kpi-card">
-        <div class="summary-kpi-label">📓 Günlük Not Yazılan Gün</div>
+        <div class="summary-kpi-label">${icon("note", 15)}Günlük Not Yazılan Gün</div>
         <div class="summary-kpi-val">${yearNotesCount}</div>
       </div>
     `;
@@ -1885,14 +2315,14 @@
 
           slotsHtml += `
             <div class="roadmap-month-slot ${activeClass} ${isTargetMonth ? "is-target-month" : ""}" title="${escapeHtml(g.title)} (${formatShortTR(g.startDate)} → ${formatShortTR(g.targetDate)})">
-              ${isTargetMonth ? `🎯 %${prog}` : isOverlapping ? "•" : ""}
+              ${isTargetMonth ? `%${prog}` : isOverlapping ? "•" : ""}
             </div>
           `;
         }
 
         row.innerHTML = `
           <div class="roadmap-goal-name" title="${escapeHtml(g.title)}">
-            ${g.horizon === "long" ? "🏔️" : "⚡"} ${escapeHtml(g.title)}
+            ${icon(g.horizon === "long" ? "mountain" : "bolt", 13)} ${escapeHtml(g.title)}
           </div>
           ${slotsHtml}
         `;
@@ -1944,7 +2374,7 @@
 
         const titleTip = [
           dTasks.length ? `${dTasks.length} görev` : "",
-          hasGoal ? "🎯 Hedef Vade Sonu" : ""
+          hasGoal ? "Hedef Vade Sonu" : ""
         ]
           .filter(Boolean)
           .join(" • ");
@@ -1999,19 +2429,19 @@
 
     summaryStrip.innerHTML = `
       <div class="summary-kpi-card">
-        <div class="summary-kpi-label">⚡ Aktif Kısa Vadeli Hedefler</div>
+        <div class="summary-kpi-label">${icon("bolt", 15)}Aktif Kısa Vadeli Hedefler</div>
         <div class="summary-kpi-val">${shortGoals.length}</div>
       </div>
       <div class="summary-kpi-card">
-        <div class="summary-kpi-label">🏔️ Aktif Uzun Vadeli Hedefler</div>
+        <div class="summary-kpi-label">${icon("mountain", 15)}Aktif Uzun Vadeli Hedefler</div>
         <div class="summary-kpi-val">${longGoals.length}</div>
       </div>
       <div class="summary-kpi-card">
-        <div class="summary-kpi-label">🔗 Hedefe Bağlı Görev Sayısı</div>
+        <div class="summary-kpi-label">${icon("link", 15)}Hedefe Bağlı Görev Sayısı</div>
         <div class="summary-kpi-val">${state.tasks.filter((t) => Boolean(t.goalId)).length}</div>
       </div>
       <div class="summary-kpi-card">
-        <div class="summary-kpi-label">🏆 Tamamlanan Hedefler</div>
+        <div class="summary-kpi-label">${icon("trophy", 15)}Tamamlanan Hedefler</div>
         <div class="summary-kpi-val">${completedGoals.length}</div>
       </div>
     `;
@@ -2058,35 +2488,35 @@
         <div class="goal-header">
           <div>
             <span class="goal-horizon-tag ${goal.horizon === "long" ? "tag-long" : "tag-short"}">
-              ${goal.horizon === "long" ? "🏔️ UZUN VADELİ HEDEF" : "⚡ KISA VADELİ HEDEF"}
+              ${goal.horizon === "long" ? `${icon("mountain", 13)} UZUN VADELİ HEDEF` : `${icon("bolt", 13)} KISA VADELİ HEDEF`}
             </span>
             <span class="badge badge-category" style="margin-left:6px;">${escapeHtml(goal.category || "Genel")}</span>
             <h3 class="goal-title">${escapeHtml(goal.title)}</h3>
             ${
               parentGoal
-                ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:3px;">🔗 Üst Vizyon: <strong>${escapeHtml(parentGoal.title)}</strong></div>`
+                ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:3px;">${icon("link", 12)} Üst Vizyon: <strong>${escapeHtml(parentGoal.title)}</strong></div>`
                 : ""
             }
           </div>
 
           <div class="task-actions">
             <button class="action-btn" data-action="add-task-for-goal" data-id="${goal.id}" title="Bu hedefe bağlı yeni görev ekle">＋ Görev</button>
-            <button class="action-btn" data-action="edit-goal" data-id="${goal.id}" title="Hedefi Düzenle">✏️</button>
+            <button class="action-btn" data-action="edit-goal" data-id="${goal.id}" title="Hedefi Düzenle" aria-label="Hedefi Düzenle">${icon("edit", 14)}</button>
             <button class="action-btn" data-action="toggle-goal-complete" data-id="${goal.id}" title="${goal.completed ? "Aktif Et" : "Hedefi Tamamlandı İşaretle"}">
-              ${goal.completed ? "↩️" : "🏆"}
+              ${goal.completed ? icon("undo", 14) : icon("trophy", 14)}
             </button>
-            <button class="action-btn" data-action="delete-goal" data-id="${goal.id}" title="Hedefi Sil">🗑️</button>
+            <button class="action-btn" data-action="delete-goal" data-id="${goal.id}" title="Hedefi Sil" aria-label="Hedefi Sil">${icon("trash", 14)}</button>
           </div>
         </div>
 
-        ${goal.why ? `<div class="goal-why-box">💡 ${escapeHtml(goal.why)}</div>` : ""}
+        ${goal.why ? `<div class="goal-why-box">${escapeHtml(goal.why)}</div>` : ""}
 
         <div class="goal-timeline-meta">
           <div>
-            <span>📅 Vade: <strong>${formatShortTR(goal.startDate)} → ${formatShortTR(goal.targetDate)}</strong></span>
+            <span>Vade: <strong>${formatShortTR(goal.startDate)} → ${formatShortTR(goal.targetDate)}</strong></span>
             <span style="margin-left:6px;color:var(--text-muted);">(${timeStats.totalDays} gün)</span>
           </div>
-          <span class="deadline-countdown ${timeStats.statusClass}">⏳ ${timeStats.remainingLabel}</span>
+          <span class="deadline-countdown ${timeStats.statusClass}">${timeStats.remainingLabel}</span>
         </div>
 
         <div class="progress-block">
@@ -2111,7 +2541,7 @@
             ? `
           <div class="goal-linked-section">
             <div class="goal-linked-header">
-              <span>🚩 Kilometre Taşları (Alt Hedefler)</span>
+              <span>Kilometre Taşları (Alt Hedefler)</span>
               <span>${milestones.filter((m) => m.done).length}/${milestones.length}</span>
             </div>
             <div class="subtasks-inline">
@@ -2133,7 +2563,7 @@
 
         <div class="goal-linked-section">
           <div class="goal-linked-header">
-            <span>📌 Bu Hedefe Bağlı Son Görevler</span>
+            <span>Bu Hedefe Bağlı Son Görevler</span>
             <button class="btn btn-ghost btn-xs" data-action="add-task-for-goal" data-id="${goal.id}">＋ Hedefe Görev Ekle</button>
           </div>
           ${
@@ -2145,7 +2575,7 @@
                     (t) => `
                 <div style="display:flex;align-items:center;justify-content:space-between;font-size:12.5px;padding:5px 8px;background:var(--bg-input);border-radius:6px;">
                   <span style="${t.completed ? "text-decoration:line-through;color:var(--text-muted);" : ""}">
-                    ${t.completed ? "✅" : "⬜"} ${escapeHtml(t.title)}
+                    ${t.completed ? "✓" : "○"} ${escapeHtml(t.title)}
                   </span>
                   <span style="font-size:11px;color:var(--text-muted);">
                     ${t.scope === "week" ? "Haftalık" : formatShortTR(t.date)}
@@ -2373,7 +2803,22 @@
     updateTimerDOM();
   }
 
-  function handleTimerComplete() {
+  // fromRoom: tamamlanma odadan gelen mesajla tetiklendiyse tekrar yayınlanmaz
+  function handleTimerComplete(fromRoom = false) {
+    const fromMode = uiState.timer.mode;
+    const switchAfterComplete = (nextMode) => {
+      switchTimerMode(nextMode, null, false);
+      if (!fromRoom) {
+        broadcastTimerAction("SWITCH_MODE", {
+          mode: nextMode,
+          fromMode,
+          reason: "complete",
+          customMinutes: null,
+          totalSeconds: uiState.timer.totalSeconds,
+          remainingSeconds: uiState.timer.remainingSeconds
+        });
+      }
+    };
     uiState.timer.running = false;
     uiState.timer.targetTimestamp = null;
     uiState.timer.remainingSeconds = 0;
@@ -2391,20 +2836,31 @@
       state.focusStats[today] = state.focusStats[today] || { sessions: 0, minutes: 0 };
       state.focusStats[today].sessions += 1;
       state.focusStats[today].minutes += completedMinutes;
+      // Haftalık özet için gün bazında hedef dağılımı (bu kayıt varsa o gün izlenmiş demektir)
+      const dayStats = state.focusStats[today];
+      if (!dayStats.byGoal || typeof dayStats.byGoal !== "object") dayStats.byGoal = {};
 
       const linkedTaskId = document.getElementById("selectTimerLinkedTask")?.value;
       if (linkedTaskId) {
         const task = state.tasks.find((t) => t.id === linkedTaskId);
         if (task) {
           task.focusedMinutes = (task.focusedMinutes || 0) + completedMinutes;
+          if (task.goalId) {
+            dayStats.byGoal[task.goalId] = (dayStats.byGoal[task.goalId] || 0) + completedMinutes;
+          }
         }
       }
+      const streakGrew = isInRoomWithOthers() ? recordRoomStudyDay(today) : false;
       saveData();
       showToast(`🎉 Harika! ${completedMinutes} dakikalık odak oturumu tamamlandı. Kısa mola zamanı!`);
-      switchTimerMode("short_break");
+      if (streakGrew) {
+        const rs = getRoomStreak();
+        showToast(rs.current > 1 ? `👥 Ortak seri ${rs.current} güne çıktı! Birlikte devam.` : "👥 Ortak seri başladı! Yarın da birlikte çalışalım.");
+      }
+      switchAfterComplete("short_break");
     } else {
       showToast("☕ Mola süresi bitti! Yeni ders/odak oturumuna hazırsın.");
-      switchTimerMode("study");
+      switchAfterComplete("study");
     }
 
     renderAll();
@@ -2420,10 +2876,10 @@
     if (statusLabel) {
       statusLabel.textContent =
         t.mode === "study"
-          ? "📚 DERS & ODAK OTURUMU"
+          ? "DERS & ODAK OTURUMU"
           : t.mode === "short_break"
-          ? "☕ KISA MOLA ZAMANI"
-          : "🛋️ UZUN MOLA & DİNLENME";
+          ? "KISA MOLA ZAMANI"
+          : "UZUN MOLA & DİNLENME";
     }
 
     const pct =
@@ -2435,7 +2891,7 @@
 
     const startPauseBtn = document.getElementById("btnTimerStartPause");
     if (startPauseBtn) {
-      startPauseBtn.textContent = t.running ? "⏸️ Duraklat" : "▶️ Başlat";
+      startPauseBtn.innerHTML = t.running ? `${icon("pause", 16)} Duraklat` : `${icon("play", 16)} Başlat`;
     }
 
     document.querySelectorAll("[data-timer-mode]").forEach((btn) => {
@@ -2454,11 +2910,13 @@
       floatingBar.classList.toggle("hidden", !showFloating);
       if (showFloating) {
         document.getElementById("floatingTimerMode").textContent =
-          t.mode === "study" ? "📚 Ders" : "☕ Mola";
+          t.mode === "study" ? "Ders" : "Mola";
         document.getElementById("floatingTimerDigits").textContent = formatted;
         document.getElementById("btnFloatingStartPause").textContent = t.running ? "⏸️" : "▶️";
       }
     }
+
+    updateRoomChatLock();
   }
 
   function renderTimerView() {
@@ -2469,6 +2927,7 @@
     const minsEl = document.getElementById("statTimerMinutesToday");
     if (sessEl) sessEl.textContent = `${todayStats.sessions} Oturum`;
     if (minsEl) minsEl.textContent = `${todayStats.minutes} dk`;
+    if (sessEl && sessEl.parentElement) decorateFigures(sessEl.parentElement.parentElement || document);
 
     const taskSel = document.getElementById("selectTimerLinkedTask");
     if (taskSel) {
@@ -2485,7 +2944,9 @@
       taskSel.value = cur;
     }
 
+    renderRoomTogether();
     updateTimerDOM();
+    maybeClearRoomChatUnread();
   }
 
   // =========================================================
@@ -2514,13 +2975,13 @@
     if (descEl) {
       if (uiState.routineTab === "active") {
         descEl.innerHTML =
-          "Aktif tekrarlayan görevlerin. Her kartın altında <strong>📊 Önceki Serilerim</strong> kaydını görebilir, rutini arşivleyebilir veya çöp kutusuna taşıyabilirsin.";
+          "Aktif tekrarlayan görevlerin. Her kartın altında <strong>Önceki Serilerim</strong> kaydını görebilir, rutini arşivleyebilir veya çöp kutusuna taşıyabilirsin.";
       } else if (uiState.routineTab === "archived") {
         descEl.innerHTML =
-          "📦 <strong>Arşivlenen Rutinler:</strong> Şu an günlük akışta görünmeyen ancak tüm geçmiş seri (streak) kayıtları korunan rutinlerin.";
+          "<strong>Arşivlenen Rutinler:</strong> Şu an günlük akışta görünmeyen ancak tüm geçmiş seri (streak) kayıtları korunan rutinlerin.";
       } else {
         descEl.innerHTML =
-          "🗑️ <strong>Çöp Kutusu:</strong> Silinen rutinler doğrudan yok olmaz, buraya gelir. İstediğin zaman <strong>♻️ Geri Yükle</strong> diyebilir veya kalıcı olarak silebilirsin.";
+          "<strong>Çöp Kutusu:</strong> Silinen rutinler doğrudan yok olmaz, buraya gelir. İstediğin zaman <strong>Geri Yükle</strong> diyebilir veya kalıcı olarak silebilirsin.";
       }
     }
 
@@ -2555,20 +3016,20 @@
       let actionButtonsHtml = "";
       if (rStatus === "active") {
         actionButtonsHtml = `
-          <button class="action-btn" data-action="edit-routine" data-id="${routine.id}" title="Düzenle">✏️</button>
-          <button class="action-btn" data-action="archive-routine" data-id="${routine.id}" title="Arşive Kaldır (Serileri Korunur)">📦 Arşivle</button>
-          <button class="action-btn" data-action="trash-routine" data-id="${routine.id}" title="Çöp Kutusuna Taşı">🗑️</button>
+          <button class="action-btn" data-action="edit-routine" data-id="${routine.id}" title="Düzenle" aria-label="Düzenle">${icon("edit", 14)}</button>
+          <button class="action-btn" data-action="archive-routine" data-id="${routine.id}" title="Arşive Kaldır (Serileri Korunur)">${icon("archive", 13)} Arşivle</button>
+          <button class="action-btn" data-action="trash-routine" data-id="${routine.id}" title="Çöp Kutusuna Taşı" aria-label="Çöp Kutusuna Taşı">${icon("trash", 14)}</button>
         `;
       } else if (rStatus === "archived") {
         actionButtonsHtml = `
-          <button class="action-btn" data-action="restore-routine" data-id="${routine.id}" title="Tekrar Aktif Et">♻️ Aktif Et</button>
-          <button class="action-btn" data-action="trash-routine" data-id="${routine.id}" title="Çöp Kutusuna Taşı">🗑️</button>
+          <button class="action-btn" data-action="restore-routine" data-id="${routine.id}" title="Tekrar Aktif Et">${icon("restore", 13)} Aktif Et</button>
+          <button class="action-btn" data-action="trash-routine" data-id="${routine.id}" title="Çöp Kutusuna Taşı" aria-label="Çöp Kutusuna Taşı">${icon("trash", 14)}</button>
         `;
       } else if (rStatus === "trashed") {
         actionButtonsHtml = `
-          <button class="action-btn" data-action="restore-routine" data-id="${routine.id}" title="Çöp Kutusundan Geri Yükle">♻️ Geri Yükle</button>
-          <button class="action-btn" data-action="archive-routine" data-id="${routine.id}" title="Arşive Taşı">📦 Arşivle</button>
-          <button class="action-btn" data-action="purge-routine" data-id="${routine.id}" title="Kalıcı Olarak Sil" style="color:var(--danger);">🔥 Kalıcı Sil</button>
+          <button class="action-btn" data-action="restore-routine" data-id="${routine.id}" title="Çöp Kutusundan Geri Yükle">${icon("restore", 13)} Geri Yükle</button>
+          <button class="action-btn" data-action="archive-routine" data-id="${routine.id}" title="Arşive Taşı">${icon("archive", 13)} Arşivle</button>
+          <button class="action-btn" data-action="purge-routine" data-id="${routine.id}" title="Kalıcı Olarak Sil" style="color:var(--danger);">${icon("trash", 13)} Kalıcı Sil</button>
         `;
       }
 
@@ -2578,9 +3039,9 @@
       card.innerHTML = `
         <div class="routine-streak-row">
           <div>
-            <span class="badge badge-streak">🔥 ${streak} Gün Seri</span>
-            <span class="badge badge-category" style="margin-left:4px;">🏆 En Uzun: ${routine.bestStreak || streak} Gün</span>
-            <span class="badge badge-category" style="margin-left:4px;">✅ Toplam: ${totalCompletions} Kez</span>
+            <span class="badge badge-streak">${icon("flame", 13)}${streak} Gün Seri</span>
+            <span class="badge badge-category" style="margin-left:4px;">${icon("trophy", 13)}En Uzun: ${routine.bestStreak || streak} Gün</span>
+            <span class="badge badge-category" style="margin-left:4px;">${icon("list", 13)}Toplam: ${totalCompletions} Kez</span>
           </div>
           <div class="task-actions">
             ${actionButtonsHtml}
@@ -2590,12 +3051,12 @@
         <div>
           <h4 style="font-size:15.5px;font-weight:700;">${escapeHtml(routine.title)}</h4>
           <div class="task-badges" style="margin-top:6px;">
-            <span class="badge badge-category">🔁 ${getRoutineFreqLabel(routine)}</span>
-            ${goal ? `<span class="badge badge-goal" data-jump-goal="${goal.id}">🎯 ${escapeHtml(goal.title)}</span>` : ""}
+            <span class="badge badge-category">${icon("repeat", 13)}${getRoutineFreqLabel(routine)}</span>
+            ${goal ? `<span class="badge badge-goal" data-jump-goal="${goal.id}">${icon("target", 13)}${escapeHtml(goal.title)}</span>` : ""}
           </div>
         </div>
 
-        ${routine.note ? `<div class="task-note-preview">📌 ${escapeHtml(routine.note)}</div>` : ""}
+        ${routine.note ? `<div class="task-note-preview">${escapeHtml(routine.note)}</div>` : ""}
 
         ${
           rStatus === "active"
@@ -2627,7 +3088,7 @@
         <!-- ÖNCEKİ SERİLERİM (STREAK HISTORY) KUTUSU -->
         <div class="streak-history-box">
           <div class="streak-history-title">
-            <span>📊 Önceki Serilerim & Seri Geçmişi</span>
+            <span>Önceki Serilerim & Seri Geçmişi</span>
             <span>${streakHistory.length} Seri Kaydı</span>
           </div>
           ${
@@ -2641,7 +3102,7 @@
                   (sh, idx) => `
                 <div class="streak-history-item">
                   <span>
-                    ${sh.isActive ? "🔥 <strong>Aktif Seri:</strong>" : `⏳ ${streakHistory.length - idx}. Seri:`}
+                    ${sh.isActive ? "<strong>Aktif Seri:</strong>" : `${streakHistory.length - idx}. Seri:`}
                     <strong>${sh.count} Gün</strong> sürdü
                   </span>
                   <span style="color:var(--text-muted);">
@@ -2677,19 +3138,19 @@
 
     statsRow.innerHTML = `
       <div class="summary-kpi-card">
-        <div class="summary-kpi-label">✅ Genel Görev Tamamlama</div>
+        <div class="summary-kpi-label">${icon("list", 15)}Genel Görev Tamamlama</div>
         <div class="summary-kpi-val">${completedTasks}/${totalTasks}</div>
       </div>
       <div class="summary-kpi-card">
-        <div class="summary-kpi-label">⏳ En Az 1 Kez Ertelenen</div>
+        <div class="summary-kpi-label">${icon("hourglass", 15)}En Az 1 Kez Ertelenen</div>
         <div class="summary-kpi-val">${postponedTasks.length}</div>
       </div>
       <div class="summary-kpi-card">
-        <div class="summary-kpi-label">⚠️ Kronik Ertelenen (2+ Kez)</div>
+        <div class="summary-kpi-label">${icon("repeat", 15)}Kronik Ertelenen (2+ Kez)</div>
         <div class="summary-kpi-val" style="color:var(--warning);">${chronicTasks.length}</div>
       </div>
       <div class="summary-kpi-card">
-        <div class="summary-kpi-label">📝 Kayıtlı Not & Yansıma</div>
+        <div class="summary-kpi-label">${icon("note", 15)}Kayıtlı Not & Yansıma</div>
         <div class="summary-kpi-val">${totalNotesCount}</div>
       </div>
     `;
@@ -2738,7 +3199,7 @@
       Object.entries(state.dailyNotes || {}).forEach(([dISO, text]) => {
         if (text && text.trim()) {
           archiveItems.push({
-            type: "📓 Günlük Not",
+            type: "Günlük Not",
             date: dISO,
             title: `${formatFullTR(dISO)} Günlük Notu`,
             text
@@ -2748,7 +3209,7 @@
       Object.entries(state.weeklyNotes || {}).forEach(([wISO, text]) => {
         if (text && text.trim()) {
           archiveItems.push({
-            type: "🧭 Haftalık Odak Notu",
+            type: "Haftalık Odak Notu",
             date: wISO,
             title: `${formatWeekRangeTR(wISO)} Haftalık Notu`,
             text
@@ -2762,7 +3223,7 @@
       state.tasks.forEach((t) => {
         (t.postponeHistory || []).forEach((h) => {
           archiveItems.push({
-            type: "⏳ Erteleme Kaydı",
+            type: "Erteleme Kaydı",
             date: h.at || t.date || getTodayISO(),
             title: t.title,
             text: `${formatShortTR(h.from)} → ${formatShortTR(h.to)} | Sebep: ${h.reason || "Belirtilmedi"}`
@@ -2775,7 +3236,7 @@
     if (uiState.noteFilter === "all" || uiState.noteFilter === "quotes") {
       (state.savedQuotes || []).forEach((sq) => {
         archiveItems.push({
-          type: "📜 Kaydedilen Günün Sözü",
+          type: "Kaydedilen Günün Sözü",
           date: sq.savedAt || getTodayISO(),
           title: `${sq.author} (${sq.source || "Alıntı"})`,
           text: `"${sq.text}"`
@@ -2859,19 +3320,19 @@
         card.innerHTML = `
           <div class="routine-info">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <h4>🔁 ${escapeHtml(r.title)}</h4>
+              <h4>${escapeHtml(r.title)}</h4>
               <span class="badge ${isArchived ? "badge-category" : "badge-priority-high"}">
-                ${isArchived ? "📦 Arşivlenmiş Rutin" : "🗑️ Çöp Kutusunda (Rutin)"}
+                ${isArchived ? "Arşivlenmiş Rutin" : "Çöp Kutusunda (Rutin)"}
               </span>
             </div>
             <div class="routine-meta">
               <span class="badge badge-category">${getRoutineFreqLabel(r)}</span>
-              <span class="badge badge-streak">🏆 En Uzun Seri: ${r.bestStreak || 0} gün</span>
+              <span class="badge badge-streak">${icon("trophy", 13)}En Uzun Seri: ${r.bestStreak || 0} gün</span>
             </div>
-            ${r.note ? `<div class="task-note-preview">📌 ${escapeHtml(r.note)}</div>` : ""}
+            ${r.note ? `<div class="task-note-preview">${escapeHtml(r.note)}</div>` : ""}
             <div class="streak-history-box" style="margin-top:8px;">
               <div class="streak-history-title">
-                <span>📊 Önceki Serilerim (Ne Kadar Sürmüş?)</span>
+                <span>Önceki Serilerim (Ne Kadar Sürmüş?)</span>
                 <span>Toplam ${history.length} seri</span>
               </div>
               ${
@@ -2883,8 +3344,8 @@
                         .map(
                           (h) => `
                           <div class="streak-history-item">
-                            <span>📅 ${formatShortTR(h.start)} — ${formatShortTR(h.end)}</span>
-                            <strong style="color:var(--warning);">🔥 ${h.count} gün sürdü</strong>
+                            <span>${formatShortTR(h.start)} — ${formatShortTR(h.end)}</span>
+                            <strong style="color:var(--warning);">${h.count} gün sürdü</strong>
                           </div>
                         `
                         )
@@ -2895,10 +3356,10 @@
           </div>
           <div class="task-actions" style="opacity:1;">
             <button class="btn btn-primary btn-xs" data-action="restore-routine" data-id="${r.id}">
-              ♻️ Geri Yükle (Aktif Et)
+              ${icon("restore", 13)} Geri Yükle (Aktif Et)
             </button>
             <button class="btn btn-secondary btn-xs" style="color:var(--danger);" data-action="purge-routine" data-id="${r.id}">
-              🔥 Kalıcı Sil
+              ${icon("trash", 13)} Kalıcı Sil
             </button>
           </div>
         `;
@@ -2915,22 +3376,22 @@
         card.innerHTML = `
           <div class="routine-info">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <h4>✅ ${escapeHtml(t.title)}</h4>
-              <span class="badge badge-priority-high">🗑️ Çöp Kutusunda (Görev)</span>
+              <h4>${escapeHtml(t.title)}</h4>
+              <span class="badge badge-priority-high">Çöp Kutusunda (Görev)</span>
             </div>
             <div class="routine-meta">
-              <span class="badge badge-category">📂 ${escapeHtml(t.category || "Genel")}</span>
-              ${t.date ? `<span class="badge badge-category">📅 Görev Tarihi: ${formatShortTR(t.date)}</span>` : ""}
-              ${(t.postponeCount || 0) > 0 ? `<span class="badge badge-postponed">⏳ ${t.postponeCount}x ertelendi</span>` : ""}
+              <span class="badge badge-category">${escapeHtml(t.category || "Genel")}</span>
+              ${t.date ? `<span class="badge badge-category">${icon("calendar", 13)}Görev Tarihi: ${formatShortTR(t.date)}</span>` : ""}
+              ${(t.postponeCount || 0) > 0 ? `<span class="badge badge-postponed">${icon("hourglass", 13)}${t.postponeCount}x ertelendi</span>` : ""}
             </div>
-            ${t.note ? `<div class="task-note-preview">📝 ${escapeHtml(t.note)}</div>` : ""}
+            ${t.note ? `<div class="task-note-preview">${escapeHtml(t.note)}</div>` : ""}
           </div>
           <div class="task-actions" style="opacity:1;">
             <button class="btn btn-primary btn-xs" data-action="restore-trashed-task" data-id="${t.id}">
-              ♻️ Geri Yükle
+              ${icon("restore", 13)} Geri Yükle
             </button>
             <button class="btn btn-secondary btn-xs" style="color:var(--danger);" data-action="purge-trashed-task" data-id="${t.id}">
-              🔥 Kalıcı Sil
+              ${icon("trash", 13)} Kalıcı Sil
             </button>
           </div>
         `;
@@ -2947,22 +3408,22 @@
         card.innerHTML = `
           <div class="routine-info">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <h4>🎯 ${escapeHtml(g.title)}</h4>
-              <span class="badge badge-priority-high">🗑️ Çöp Kutusunda (Hedef)</span>
+              <h4>${escapeHtml(g.title)}</h4>
+              <span class="badge badge-priority-high">Çöp Kutusunda (Hedef)</span>
             </div>
             <div class="routine-meta">
-              <span class="badge badge-category">${g.horizon === "long" ? "🏔️ Uzun Vadeli" : "⚡ Kısa Vadeli"}</span>
-              <span class="badge badge-category">📂 ${escapeHtml(g.category || "Genel")}</span>
-              ${g.targetDate ? `<span class="badge badge-category">🏁 Vade: ${formatShortTR(g.targetDate)}</span>` : ""}
+              <span class="badge badge-category">${g.horizon === "long" ? `${icon("mountain", 13)}Uzun Vadeli` : `${icon("bolt", 13)}Kısa Vadeli`}</span>
+              <span class="badge badge-category">${escapeHtml(g.category || "Genel")}</span>
+              ${g.targetDate ? `<span class="badge badge-category">${icon("flag", 13)}Vade: ${formatShortTR(g.targetDate)}</span>` : ""}
             </div>
-            ${g.why ? `<div class="task-note-preview">💡 ${escapeHtml(g.why)}</div>` : ""}
+            ${g.why ? `<div class="task-note-preview">${escapeHtml(g.why)}</div>` : ""}
           </div>
           <div class="task-actions" style="opacity:1;">
             <button class="btn btn-primary btn-xs" data-action="restore-trashed-goal" data-id="${g.id}">
-              ♻️ Geri Yükle
+              ${icon("restore", 13)} Geri Yükle
             </button>
             <button class="btn btn-secondary btn-xs" style="color:var(--danger);" data-action="purge-trashed-goal" data-id="${g.id}">
-              🔥 Kalıcı Sil
+              ${icon("trash", 13)} Kalıcı Sil
             </button>
           </div>
         `;
@@ -2973,7 +3434,7 @@
     if (renderedCount === 0) {
       listEl.innerHTML = `
         <div class="empty-state">
-          🗑️ Çöp kutusu ve arşiv şu an boş. Silinen görevler, hedefler ve rutinler burada güvende tutulur.
+          Çöp kutusu ve arşiv şu an boş. Silinen görevler, hedefler ve rutinler burada güvende tutulur.
         </div>
       `;
     }
@@ -3007,14 +3468,16 @@
     const dailyEntries = [];
     Object.entries(state.dailyNotes || {}).forEach(([dISO, text]) => {
       if (text && text.trim()) {
+        const isAi = text.includes("#ai");
         dailyEntries.push({
           id: `daily_${dISO}`,
           category: "daily",
-          badge: "📓 Günün Notu",
+          isAi: isAi,
+          badge: isAi ? "Günün Notu · #ai" : "Günün Notu",
           dateISO: dISO,
           dateTitle: formatFullTR(dISO),
           relativeLabel: getRelativeDayLabel(dISO),
-          subtitle: "Günlük Yansıma & Serbest Not",
+          subtitle: isAi ? "Yapay Zeka Notu" : "Günlük Yansıma & Serbest Not",
           text: text.trim()
         });
       }
@@ -3026,7 +3489,7 @@
         weeklyEntries.push({
           id: `weekly_${wISO}`,
           category: "weekly",
-          badge: "🧭 Haftalık Odak Notu",
+          badge: "Haftalık Odak Notu",
           dateISO: wISO,
           dateTitle: `${formatWeekRangeTR(wISO)} Haftası`,
           relativeLabel: `Hafta Başlangıcı: ${formatShortTR(wISO)}`,
@@ -3045,7 +3508,7 @@
           rawId: t.id,
           itemType: "task",
           category: "task_goal",
-          badge: "📝 Görev Altı Notu",
+          badge: "Görev Altı Notu",
           dateISO: dISO,
           dateTitle: formatFullTR(dISO),
           relativeLabel: getRelativeDayLabel(dISO),
@@ -3063,7 +3526,7 @@
           rawId: g.id,
           itemType: "goal",
           category: "task_goal",
-          badge: "🎯 Hedef & Vizyon Notu",
+          badge: "Hedef & Vizyon Notu",
           dateISO: dISO,
           dateTitle: `Hedef Başlangıcı: ${formatFullTR(dISO)}`,
           relativeLabel: g.targetDate ? `Vade: ${formatShortTR(g.targetDate)}` : "Aktif Hedef",
@@ -3080,7 +3543,7 @@
         id: `quote_${sq.id}`,
         rawId: sq.id,
         category: "quotes",
-        badge: "📜 Kaydedilen Günün Sözü",
+        badge: "Kaydedilen Günün Sözü",
         dateISO: dISO,
         dateTitle: `${formatFullTR(dISO)} tarihinde kaydedildi`,
         relativeLabel: getRelativeDayLabel(dISO),
@@ -3089,29 +3552,56 @@
       });
     });
 
+    const reportEntries = [];
+    (state.reports || []).forEach((r) => {
+      const isAi =
+        r.author === "ai" ||
+        (r.content && r.content.includes("#ai")) ||
+        (r.tags && r.tags.includes("#ai"));
+      const dISO = r.date || (r.createdAt ? r.createdAt.slice(0, 10) : getTodayISO());
+      reportEntries.push({
+        id: `report_${r.id}`,
+        rawId: r.id,
+        itemType: "report",
+        category: "reports",
+        isAi: isAi,
+        badge: isAi ? "Rapor · #ai" : "Şahsi Rapor",
+        dateISO: dISO,
+        dateTitle: formatFullTR(dISO),
+        relativeLabel: getRelativeDayLabel(dISO),
+        subtitle: `Rapor: ${r.title || "Çalışma & Oturum Raporu"}`,
+        text: r.content ? r.content.trim() : ""
+      });
+    });
+
     const allCompiled = [
       ...dailyEntries,
       ...weeklyEntries,
       ...taskGoalEntries,
+      ...reportEntries,
       ...quoteEntries
     ];
 
     // Üst İstatistik Şeridi
     summaryEl.innerHTML = `
       <div class="summary-kpi-card">
-        <div class="summary-kpi-label">📓 Günlük Not Yazılan Gün</div>
+        <div class="summary-kpi-label">${icon("note", 15)}Günlük Not Yazılan Gün</div>
         <div class="summary-kpi-val">${dailyEntries.length}</div>
       </div>
       <div class="summary-kpi-card">
-        <div class="summary-kpi-label">🧭 Haftalık Odak Notları</div>
+        <div class="summary-kpi-label">${icon("calendar", 15)}Haftalık Odak Notları</div>
         <div class="summary-kpi-val">${weeklyEntries.length}</div>
       </div>
       <div class="summary-kpi-card">
-        <div class="summary-kpi-label">📝 Görev & Hedef Notları</div>
+        <div class="summary-kpi-label">${icon("target", 15)}Görev & Hedef Notları</div>
         <div class="summary-kpi-val">${taskGoalEntries.length}</div>
       </div>
       <div class="summary-kpi-card">
-        <div class="summary-kpi-label">📜 Kaydedilen Günün Sözleri</div>
+        <div class="summary-kpi-label">${icon("chart", 15)}Raporlar</div>
+        <div class="summary-kpi-val">${reportEntries.length}</div>
+      </div>
+      <div class="summary-kpi-card">
+        <div class="summary-kpi-label">${icon("quote", 15)}Kaydedilen Günün Sözleri</div>
         <div class="summary-kpi-val">${quoteEntries.length}</div>
       </div>
     `;
@@ -3121,11 +3611,13 @@
     const cDaily = document.getElementById("countNotesDaily");
     const cWeekly = document.getElementById("countNotesWeekly");
     const cTaskGoal = document.getElementById("countNotesTaskGoal");
+    const cReports = document.getElementById("countNotesReports");
     const cQuotes = document.getElementById("countNotesQuotes");
     if (cAll) cAll.textContent = allCompiled.length;
     if (cDaily) cDaily.textContent = dailyEntries.length;
     if (cWeekly) cWeekly.textContent = weeklyEntries.length;
     if (cTaskGoal) cTaskGoal.textContent = taskGoalEntries.length;
+    if (cReports) cReports.textContent = reportEntries.length;
     if (cQuotes) cQuotes.textContent = quoteEntries.length;
 
     const activeFilter = uiState.compiledNoteFilter || "all";
@@ -3133,8 +3625,56 @@
       btn.classList.toggle("active", btn.dataset.compiledNoteFilter === activeFilter);
     });
 
+    // Günün Notları & Raporlar İçin AI / Şahsi Alt Filtresi
+    const subFilterRow = document.getElementById("notesSubFilterRow");
+    const subFilterLabel = document.getElementById("notesSubFilterLabel");
+    const cSubAll = document.getElementById("countSubNotesAll");
+    const cSubAi = document.getElementById("countSubNotesAi");
+    const cSubUser = document.getElementById("countSubNotesUser");
+
+    const activeSubFilter = uiState.noteSubFilter || "all";
+
+    if (activeFilter === "daily" || activeFilter === "reports") {
+      if (subFilterRow) subFilterRow.style.display = "flex";
+      if (activeFilter === "daily") {
+        if (subFilterLabel) subFilterLabel.textContent = "Günlük Not:";
+        const aiDailyCount = dailyEntries.filter((d) => d.isAi).length;
+        const userDailyCount = dailyEntries.filter((d) => !d.isAi).length;
+        if (cSubAll) cSubAll.textContent = dailyEntries.length;
+        if (cSubAi) cSubAi.textContent = aiDailyCount;
+        if (cSubUser) cSubUser.textContent = userDailyCount;
+      } else {
+        if (subFilterLabel) subFilterLabel.textContent = "Rapor Filtresi:";
+        const aiReportsCount = reportEntries.filter((r) => r.isAi).length;
+        const userReportsCount = reportEntries.filter((r) => !r.isAi).length;
+        if (cSubAll) cSubAll.textContent = reportEntries.length;
+        if (cSubAi) cSubAi.textContent = aiReportsCount;
+        if (cSubUser) cSubUser.textContent = userReportsCount;
+      }
+    } else {
+      if (subFilterRow) subFilterRow.style.display = "none";
+    }
+
+    document.querySelectorAll("[data-note-subfilter]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.noteSubfilter === activeSubFilter);
+    });
+
     let filtered = allCompiled;
-    if (activeFilter !== "all") {
+    if (activeFilter === "daily") {
+      filtered = dailyEntries;
+      if (activeSubFilter === "ai") {
+        filtered = filtered.filter((d) => d.isAi);
+      } else if (activeSubFilter === "user") {
+        filtered = filtered.filter((d) => !d.isAi);
+      }
+    } else if (activeFilter === "reports") {
+      filtered = reportEntries;
+      if (activeSubFilter === "ai") {
+        filtered = filtered.filter((r) => r.isAi);
+      } else if (activeSubFilter === "user") {
+        filtered = filtered.filter((r) => !r.isAi);
+      }
+    } else if (activeFilter !== "all") {
       filtered = allCompiled.filter((item) => item.category === activeFilter);
     }
 
@@ -3156,60 +3696,94 @@
     if (filtered.length === 0) {
       timelineEl.innerHTML = `
         <div class="empty-state">
-          📓 Bu filtrede henüz kayıtlı bir not bulunmuyor. Yukarıdaki kutudan istediğin bir tarihi seçip hemen günlük notunu yazabilirsin.
+          Bu filtrede henüz kayıtlı bir not veya rapor bulunmuyor. Yukarıdaki kutudan istediğin tarihi seçip hemen notunu veya raporunu yazabilirsin.
         </div>
       `;
       return;
     }
 
     filtered.forEach((item) => {
+      const isReport = item.category === "reports";
+      const isAiDaily = item.category === "daily" && item.isAi;
+      let cardClass = `compiled-note-card type-${item.category}`;
+      if (isReport) {
+        cardClass += item.isAi ? " type-report-ai" : " type-report-user";
+      } else if (isAiDaily) {
+        cardClass += " type-report-ai";
+      }
       const card = document.createElement("div");
-      card.className = `compiled-note-card type-${item.category}`;
+      card.className = cardClass;
 
       let actionsHtml = "";
       if (item.category === "daily") {
         actionsHtml = `
           <button class="btn btn-ghost btn-xs" data-action="jump-note-date" data-date="${item.dateISO}">
-            📅 O Güne Git
+            ${icon("calendar", 13)} O Güne Git
           </button>
           <button class="btn btn-secondary btn-xs" data-action="edit-daily-note-in-page" data-date="${item.dateISO}">
-            ✏️ Düzenle
+            ${icon("edit", 13)} Düzenle
           </button>
           <button class="btn btn-ghost btn-xs" style="color:var(--danger);" data-action="delete-daily-note" data-date="${item.dateISO}">
-            🗑️ Sil
+            ${icon("trash", 13)} Sil
           </button>
         `;
       } else if (item.category === "weekly") {
         actionsHtml = `
           <button class="btn btn-ghost btn-xs" data-action="jump-week-note" data-date="${item.dateISO}">
-            📅 O Haftaya Git
+            ${icon("calendar", 13)} O Haftaya Git
           </button>
           <button class="btn btn-ghost btn-xs" style="color:var(--danger);" data-action="delete-weekly-note" data-date="${item.dateISO}">
-            🗑️ Sil
+            ${icon("trash", 13)} Sil
           </button>
         `;
       } else if (item.category === "task_goal") {
         actionsHtml = `
           <button class="btn btn-ghost btn-xs" data-action="jump-note-date" data-date="${item.dateISO}">
-            📅 Tarihe Git
+            ${icon("calendar", 13)} Tarihe Git
           </button>
           <button class="btn btn-secondary btn-xs" data-action="${item.itemType === "task" ? "edit-task" : "edit-goal"}" data-id="${item.rawId}">
-            ✏️ Düzenle
+            ${icon("edit", 13)} Düzenle
+          </button>
+        `;
+      } else if (item.category === "reports") {
+        actionsHtml = `
+          <button class="btn btn-ghost btn-xs" data-action="jump-note-date" data-date="${item.dateISO}">
+            ${icon("calendar", 13)} O Güne Git
+          </button>
+          <button class="btn btn-secondary btn-xs" data-action="edit-report" data-id="${item.rawId}">
+            ${icon("edit", 13)} Düzenle
+          </button>
+          <button class="btn btn-ghost btn-xs" style="color:var(--danger);" data-action="delete-report" data-id="${item.rawId}">
+            ${icon("trash", 13)} Sil
           </button>
         `;
       } else if (item.category === "quotes") {
         actionsHtml = `
           <button class="btn btn-ghost btn-xs" style="color:var(--danger);" data-action="delete-saved-quote" data-id="${item.rawId}">
-            🗑️ Koleksiyondan Kaldır
+            ${icon("trash", 13)} Koleksiyondan Kaldır
           </button>
         `;
+      }
+
+      let badgeHtml = `<span class="badge badge-category">${item.badge}</span>`;
+      if (isReport) {
+        badgeHtml = item.isAi
+          ? `<span class="badge badge-ai">Yapay Zeka · #ai</span>`
+          : `<span class="badge badge-user">Şahsi Rapor</span>`;
+      } else if (isAiDaily) {
+        badgeHtml = `<span class="badge badge-ai">Günün Notu · #ai</span>`;
+      }
+
+      let textHtml = escapeHtml(item.text);
+      if (isReport || isAiDaily) {
+        textHtml = textHtml.replace(/(#ai\b)/gi, `<span class="tag-ai">$1</span>`);
       }
 
       card.innerHTML = `
         <div class="compiled-note-header">
           <div class="compiled-note-date-box">
-            <span class="badge badge-category">${item.badge}</span>
-            <span class="compiled-note-date-main">📅 ${escapeHtml(item.dateTitle)}</span>
+            ${badgeHtml}
+            <span class="compiled-note-date-main">${escapeHtml(item.dateTitle)}</span>
             <span class="badge badge-streak">${escapeHtml(item.relativeLabel)}</span>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -3217,7 +3791,7 @@
           </div>
         </div>
         <div class="compiled-note-title">${escapeHtml(item.subtitle)}</div>
-        <div class="compiled-note-body">${escapeHtml(item.text)}</div>
+        <div class="compiled-note-body">${textHtml}</div>
       `;
 
       timelineEl.appendChild(card);
@@ -3242,7 +3816,7 @@
     },
     timer: {
       title: "Odak & Ders Zamanlayıcısı",
-      subtitle: "Ders, kısa mola ve uzun mola sürelerini Spotify müzikleri ve ses efektleri eşliğinde yönet."
+      subtitle: "Ders, kısa mola ve uzun mola sürelerini ses efektleri ve odak ambiyansı eşliğinde yönet."
     },
     goals: {
       title: "Hedef Pusulası (Kısa & Uzun Vadeli)",
@@ -3255,6 +3829,10 @@
     notes: {
       title: "Notlarım (Derlenmiş Not Defterim)",
       subtitle: "Hangi gün ne yazdığını, günün notlarını, görev/hedef notlarını ve kaydettiğin sözleri kronolojik olarak tek sayfada incele."
+    },
+    reports: {
+      title: "📊 Raporlar & Oturum Kayıtları",
+      subtitle: "Ders devirleri, pointmark özetleri, yapay zeka oturum raporları ve kendi hazırladığın süreç raporları."
     },
     insights: {
       title: "Erteleme & Not Arşivi",
@@ -3273,6 +3851,8 @@
     } catch (_) {}
     document.querySelectorAll(".nav-item").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.view === viewName);
+      if (btn.dataset.view === viewName) btn.setAttribute("aria-current", "page");
+      else btn.removeAttribute("aria-current");
     });
     document.querySelectorAll(".view-section").forEach((sec) => {
       const isTarget = sec.id === `view-${viewName}`;
@@ -3405,7 +3985,7 @@
 
     const today = getTodayISO();
     if (goal) {
-      titleEl.textContent = "✏️ Hedefi Düzenle";
+      titleEl.textContent = "Hedefi Düzenle";
       idInput.value = goal.id;
       nameInput.value = goal.title;
       horizonSel.value = goal.horizon || "short";
@@ -3416,7 +3996,7 @@
       whyInput.value = goal.why || "";
       uiState.modalMilestonesTemp = JSON.parse(JSON.stringify(goal.milestones || []));
     } else {
-      titleEl.textContent = "🎯 Yeni Hedef Tanımla";
+      titleEl.textContent = "Yeni Hedef Tanımla";
       idInput.value = "";
       nameInput.value = "";
       horizonSel.value = "short";
@@ -3461,7 +4041,7 @@
     const noteInput = document.getElementById("routineModalNote");
 
     if (routine) {
-      document.getElementById("modalRoutineTitle").textContent = "✏️ Tekrarlayan Görevi Düzenle";
+      document.getElementById("modalRoutineTitle").textContent = "Tekrarlayan Görevi Düzenle";
       idInput.value = routine.id;
       nameInput.value = routine.title;
       freqSel.value = routine.freq || "daily";
@@ -3472,7 +4052,7 @@
         btn.classList.toggle("active", days.includes(Number(btn.dataset.day)));
       });
     } else {
-      document.getElementById("modalRoutineTitle").textContent = "🔁 Tekrarlayan Görev (Rutin) Ekle";
+      document.getElementById("modalRoutineTitle").textContent = "Tekrarlayan Görev (Rutin) Ekle";
       idInput.value = "";
       nameInput.value = "";
       freqSel.value = "daily";
@@ -3513,18 +4093,1164 @@
   // =========================================================
   // =========================================================
   // ORTAK POMODORO ÇALIŞMA ODASI (P2P WEBRTC — PEERJS)
+  // ---------------------------------------------------------
+  // Yıldız topoloji: oda kurucusu (host) merkezdir, misafirler yalnızca
+  // host'a bağlanır. Host her misafirden gelen ROOM_RELAY_TYPES türündeki
+  // mesajı uygular ve diğer misafirlere olduğu gibi iletir.
+  //
+  // Mesaj zarfı: { v, type, from (clientId), name, ts, ...alanlar }
+  //   HELLO        misafir → host   { resume }
+  //   WELCOME      host → misafir   { hostName, participants, timer, maxGuests }
+  //   PARTICIPANTS host → herkes    { participants: [{ id, name, isHost, status }] }
+  //   TIMER        herkes (relay)   { action, data, state }  state = sayaç anlık görüntüsü
+  //   PING / PONG  iki yönlü        { t, timer? }  (host PING'i sayaç görüntüsü taşır)
+  //   BYE          misafir → host   bilinçli ayrılma
+  //   ROOM_CLOSED  host → herkes    oda kapatıldı
+  //   ROOM_FULL    host → misafir   oda dolu
+  //   REPLACED     host → eski bağlantı  aynı kişi başka bağlantıdan geldi
+  //   STATUS       misafir → host   { work: { text, done } | null }  "şu an ne çalışıyorum";
+  //                host saklar ve PARTICIPANTS ile herkese dağıtır (ham hali iletilmez)
+  //   CHAT         herkes (relay)   { text }  mola sohbeti; host ders sırasında reddeder
+  //   (PARTICIPANTS/WELCOME içindeki her katılımcı { work } taşır; WELCOME { chat } geçmişi de taşır)
+  // Yeni özellik eklemek için: türü ROOM_RELAY_TYPES'a ekle ve
+  // ROOM_MESSAGE_HANDLERS içine bir işleyici yaz.
   // =========================================================
+  const ROOM_PROTOCOL_VERSION = 1;
+  const ROOM_PEER_PREFIX = "pusulapp-room-";
+  const ROOM_CODE_PREFIX = "PUSULA-";
+  const ROOM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // 0/O, 1/I/L yok
+  const ROOM_CODE_LENGTH = 5;
+  const ROOM_MAX_GUESTS = 8;
+  const ROOM_SESSION_KEY = "pusulapp_room_session_v1";
+  const ROOM_CLIENT_ID_KEY = "pusulapp_room_client_id_v1";
+  const ROOM_SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+  const ROOM_HEARTBEAT_MS = 4000;
+  const ROOM_SILENCE_TIMEOUT_MS = 15000;
+  const ROOM_GUEST_GRACE_MS = 90000;
+  const ROOM_RECONNECT_WINDOW_MS = 90000;
+  const ROOM_INITIAL_JOIN_WINDOW_MS = 25000;
+  const ROOM_CONNECT_TIMEOUT_MS = 10000;
+  const ROOM_HOST_RECLAIM_WINDOW_MS = 60000;
+  const ROOM_SYNC_GUARD_MS = 3000;
+  const ROOM_RELAY_TYPES = new Set(["TIMER", "STATUS", "CHAT"]);
+  const ROOM_WORK_MAX_LEN = 80;
+  const ROOM_CHAT_MAX_LEN = 240;
+  const ROOM_CHAT_MAX_COUNT = 60;
+  const ROOM_CHAT_WELCOME_COUNT = 30;
+  const ROOM_CHAT_MIN_INTERVAL_MS = 400;
+  const ROOM_WORK_KEY = "pusulapp_room_work_v1";
+
   let roomState = {
     peer: null,
-    conn: null,
+    conn: null, // misafir: host'a olan güncel bağlantı
     isHost: false,
     isWaiting: false,
     roomCode: null,
     connectedPeerName: null,
-    myUserName: "Ben"
+    myUserName: "Ben",
+    clientId: null,
+    status: "idle", // 'idle' | 'opening' | 'open' | 'connecting' | 'connected' | 'reconnecting'
+    guests: new Map(), // host: clientId -> { conn, name, status, lastSeen, joinedAt, graceTimer }
+    participants: [], // misafir: host'tan gelen son liste
+    hostName: null,
+    everConnected: false,
+    lastSeen: 0,
+    heartbeatTimer: null,
+    reconnectTimer: null,
+    reconnectStartedAt: 0,
+    reconnectAttempt: 0,
+    connectTimeoutTimer: null,
+    signalingRetryTimer: null,
+    signalingRetryAttempt: 0,
+    hostOpenTimer: null,
+    hostOpenFailures: 0,
+    createAttempt: 0,
+    reclaiming: false,
+    reclaimStartedAt: 0,
+    lastTimerActivityAt: 0,
+    myWork: null, // { text, done } — "şu an ne çalışıyorum"
+    myWorkKnown: false, // bu sekme bu oda için durumunu kendisi belirlediyse true
+    chat: [], // [{ from, name, text, ts }] — yalnızca bellekte
+    chatUnread: 0,
+    sessionToken: 0 // her oda oturumunda artar; eski peer/bağlantı olaylarını ayıklar
   };
 
+  // ---------- Yardımcılar ----------
+  function getRoomClientId() {
+    if (roomState.clientId) return roomState.clientId;
+    let id = null;
+    try { id = sessionStorage.getItem(ROOM_CLIENT_ID_KEY); } catch (_) {}
+    if (!id) {
+      id = "c" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+      try { sessionStorage.setItem(ROOM_CLIENT_ID_KEY, id); } catch (_) {}
+    }
+    roomState.clientId = id;
+    return id;
+  }
+
+  function generateRoomCode() {
+    const n = ROOM_CODE_ALPHABET.length;
+    const buf = new Uint32Array(ROOM_CODE_LENGTH);
+    if (window.crypto && window.crypto.getRandomValues) {
+      window.crypto.getRandomValues(buf);
+    } else {
+      for (let i = 0; i < buf.length; i++) buf[i] = Math.floor(Math.random() * 4294967296);
+    }
+    let s = "";
+    for (let i = 0; i < buf.length; i++) s += ROOM_CODE_ALPHABET[buf[i] % n];
+    return ROOM_CODE_PREFIX + s;
+  }
+
+  function normalizeRoomCode(input) {
+    let s = String(input || "").trim();
+    const m = s.match(/[?&]room=([^&#\s]+)/i);
+    if (m) s = decodeURIComponent(m[1]);
+    s = s.toUpperCase().replace(/[^A-Z0-9-]/g, "");
+    if (!s) return "";
+    if (s.startsWith("PUSULA-")) return s;
+    if (s.startsWith("PUSULA")) return ROOM_CODE_PREFIX + s.slice(6);
+    return ROOM_CODE_PREFIX + s;
+  }
+
+  function roomPeerIdFor(code) {
+    return ROOM_PEER_PREFIX + String(code).toLowerCase();
+  }
+
+  function sanitizeRoomName(name) {
+    return String(name || "").trim().slice(0, 20) || "Arkadaşın";
+  }
+
+  function readRoomNameInput() {
+    const nameInput = document.getElementById("inputRoomUserName");
+    const name = (nameInput && nameInput.value.trim()) || roomState.myUserName || "Ben";
+    roomState.myUserName = name.slice(0, 20);
+    try { localStorage.setItem("pusulapp_user_name", roomState.myUserName); } catch (_) {}
+    return roomState.myUserName;
+  }
+
+  function isRoomTokenStale(token) {
+    return token !== roomState.sessionToken;
+  }
+
+  function saveRoomSession(role) {
+    try {
+      sessionStorage.setItem(ROOM_SESSION_KEY, JSON.stringify({
+        role,
+        code: roomState.roomCode,
+        name: roomState.myUserName,
+        savedAt: Date.now()
+      }));
+    } catch (_) {}
+  }
+
+  function loadRoomSession() {
+    try {
+      const raw = sessionStorage.getItem(ROOM_SESSION_KEY);
+      if (!raw) return null;
+      const s = JSON.parse(raw);
+      if (!s || !s.code || (s.role !== "host" && s.role !== "guest")) return null;
+      if (!s.savedAt || Date.now() - s.savedAt > ROOM_SESSION_MAX_AGE_MS) return null;
+      return s;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function clearRoomSession() {
+    try { sessionStorage.removeItem(ROOM_SESSION_KEY); } catch (_) {}
+    try { sessionStorage.removeItem(ROOM_WORK_KEY); } catch (_) {}
+  }
+
+  // ---------- "Şu an ne çalışıyorum" & mola sohbeti yardımcıları ----------
+  // Eşlerden gelen her şey güvenilmez girdidir: tür ve uzunluk burada doğrulanır.
+  function sanitizeWork(w) {
+    if (!w || typeof w !== "object") return null;
+    const text = typeof w.text === "string" ? w.text.replace(/\s+/g, " ").trim().slice(0, ROOM_WORK_MAX_LEN) : "";
+    if (!text) return null;
+    return { text, done: w.done === true };
+  }
+
+  function sameWork(a, b) {
+    if (!a || !b) return !a && !b;
+    return a.text === b.text && a.done === b.done;
+  }
+
+  function sanitizeChatText(t) {
+    if (typeof t !== "string") return "";
+    return t.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, ROOM_CHAT_MAX_LEN);
+  }
+
+  function sanitizeChatEntry(m) {
+    if (!m || typeof m !== "object") return null;
+    const text = sanitizeChatText(m.text);
+    if (!text) return null;
+    const ts = typeof m.ts === "number" && isFinite(m.ts) ? m.ts : Date.now();
+    return { from: String(m.from || "").slice(0, 64), name: sanitizeRoomName(m.name), text, ts };
+  }
+
+  function sanitizeParticipants(arr) {
+    if (!Array.isArray(arr)) return [];
+    return arr.slice(0, ROOM_MAX_GUESTS + 1).filter((p) => p && typeof p === "object").map((p) => ({
+      id: String(p.id || "").slice(0, 64),
+      name: sanitizeRoomName(p.name),
+      isHost: p.isHost === true,
+      status: p.status === "connected" || p.status === "reconnecting" ? p.status : "unknown",
+      work: sanitizeWork(p.work)
+    }));
+  }
+
+  function saveMyWork() {
+    try {
+      sessionStorage.setItem(ROOM_WORK_KEY, JSON.stringify({ code: roomState.roomCode, work: roomState.myWork }));
+    } catch (_) {}
+  }
+
+  function loadMyWork(code) {
+    roomState.myWork = null;
+    roomState.myWorkKnown = false;
+    try {
+      const raw = sessionStorage.getItem(ROOM_WORK_KEY);
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      if (!s || s.code !== code) return;
+      roomState.myWork = sanitizeWork(s.work);
+      roomState.myWorkKnown = true;
+    } catch (_) {}
+  }
+
+  function setMyWork(work) {
+    if (!roomState.roomCode) return;
+    roomState.myWork = sanitizeWork(work);
+    roomState.myWorkKnown = true;
+    saveMyWork();
+    if (roomState.isHost) broadcastParticipants();
+    else sendRoomMessage(makeRoomMessage("STATUS", { work: roomState.myWork }));
+    updateRoomUI();
+  }
+
+  function isRoomChatLocked() {
+    const t = uiState.timer;
+    return t.mode === "study" && !!t.running;
+  }
+
+  function pushRoomChat(entry) {
+    if (!entry) return;
+    roomState.chat.push(entry);
+    if (roomState.chat.length > ROOM_CHAT_MAX_COUNT) roomState.chat.splice(0, roomState.chat.length - ROOM_CHAT_MAX_COUNT);
+    if (entry.from !== getRoomClientId() && !isRoomChatInView()) roomState.chatUnread++;
+    renderRoomChat();
+  }
+
+  function sendRoomChat(text) {
+    if (!roomState.roomCode) return;
+    const clean = sanitizeChatText(text);
+    if (!clean) return;
+    if (isRoomChatLocked()) {
+      showToast("🔒 Ders sırasında sohbet kapalı, molada yazabilirsin.");
+      return;
+    }
+    const linked = roomState.isHost || roomState.status === "connected";
+    if (!linked) {
+      showToast("📡 Odaya bağlı değilsin, mesaj gönderilemedi.");
+      return;
+    }
+    const msg = makeRoomMessage("CHAT", { text: clean });
+    sendRoomMessage(msg);
+    pushRoomChat({ from: msg.from, name: msg.name, text: clean, ts: msg.ts });
+  }
+
+  // Ortak seri: başka biriyle aynı odada ders oturumu tamamlanan art arda günler
+  function normalizeRoomStreak(r) {
+    const o = r && typeof r === "object" ? r : {};
+    const n = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.floor(Number(v)) : 0);
+    const lastDay = typeof o.lastDay === "string" && /^\d{4}-\d{2}-\d{2}$/.test(o.lastDay) ? o.lastDay : null;
+    const current = n(o.current);
+    return { current, best: Math.max(n(o.best), current), lastDay };
+  }
+
+  function getRoomStreak() {
+    state.roomStreak = normalizeRoomStreak(state.roomStreak);
+    return state.roomStreak;
+  }
+
+  // Seri bugün ya da dün beslendiyse hâlâ canlıdır
+  function getLiveRoomStreak() {
+    const rs = getRoomStreak();
+    const today = getTodayISO();
+    const alive = rs.lastDay === today || rs.lastDay === addDaysISO(today, -1);
+    return { current: alive ? rs.current : 0, best: rs.best, today: rs.lastDay === today };
+  }
+
+  // true dönerse seri bugün ilk kez arttı
+  function recordRoomStudyDay(today) {
+    const rs = getRoomStreak();
+    if (rs.lastDay === today) return false;
+    rs.current = rs.lastDay === addDaysISO(today, -1) ? rs.current + 1 : 1;
+    rs.lastDay = today;
+    rs.best = Math.max(rs.best, rs.current);
+    return true;
+  }
+
+  function isInRoomWithOthers() {
+    if (!roomState.roomCode) return false;
+    if (roomState.isHost) {
+      let any = false;
+      roomState.guests.forEach((e) => { if (e.status === "connected") any = true; });
+      return any;
+    }
+    return roomState.status === "connected";
+  }
+
+  function makeRoomMessage(type, payload = {}) {
+    return Object.assign({
+      v: ROOM_PROTOCOL_VERSION,
+      type,
+      from: getRoomClientId(),
+      name: roomState.myUserName,
+      ts: Date.now()
+    }, payload);
+  }
+
+  function sendTo(conn, msg) {
+    if (!conn || !conn.open) return false;
+    try {
+      conn.send(msg);
+      return true;
+    } catch (err) {
+      console.warn("PeerJS send error:", err);
+      return false;
+    }
+  }
+
+  // Host: tüm bağlı misafirlere (exceptId hariç). Misafir: host'a.
+  function sendRoomMessage(msg, exceptId = null) {
+    if (roomState.isHost) {
+      roomState.guests.forEach((entry, id) => {
+        if (id !== exceptId && entry.conn && entry.status === "connected") sendTo(entry.conn, msg);
+      });
+    } else if (roomState.status === "connected") {
+      sendTo(roomState.conn, msg);
+    }
+  }
+
+  // ---------- Sayaç anlık görüntüsü ----------
+  // Saat farkından etkilenmemek için mutlak zaman yerine kalan milisaniye gönderilir.
+  function getTimerSnapshot() {
+    const t = uiState.timer;
+    const running = !!(t.running && t.targetTimestamp);
+    const remainingMs = running ? Math.max(0, t.targetTimestamp - Date.now()) : t.remainingSeconds * 1000;
+    return {
+      mode: t.mode,
+      totalSeconds: t.totalSeconds,
+      remainingSeconds: Math.round(remainingMs / 1000),
+      remainingMs,
+      running
+    };
+  }
+
+  function applyTimerSnapshot(s) {
+    if (!s || typeof s !== "object") return;
+    const t = uiState.timer;
+    if (typeof s.mode === "string") t.mode = s.mode;
+    if (typeof s.totalSeconds === "number" && s.totalSeconds > 0) t.totalSeconds = s.totalSeconds;
+    let ms = t.remainingSeconds * 1000;
+    if (typeof s.remainingMs === "number") ms = s.remainingMs;
+    else if (typeof s.remainingSeconds === "number") ms = s.remainingSeconds * 1000;
+    ms = Math.max(0, ms);
+    if (s.running && ms > 0) {
+      t.running = true;
+      t.targetTimestamp = Date.now() + ms;
+    } else {
+      t.running = false;
+      t.targetTimestamp = null;
+    }
+    t.remainingSeconds = Math.round(ms / 1000);
+    roomState.lastTimerActivityAt = Date.now();
+    saveTimerState();
+    updateTimerDOM();
+  }
+
+  function timerDiffersFromSnapshot(s) {
+    const local = getTimerSnapshot();
+    if (local.mode !== s.mode || local.running !== !!s.running || local.totalSeconds !== s.totalSeconds) return true;
+    return Math.abs(local.remainingMs - (typeof s.remainingMs === "number" ? s.remainingMs : 0)) > 1500;
+  }
+
+  // Misafir: host'un düzenli gönderdiği görüntüyle sessiz kayma düzeltmesi
+  function maybeCorrectTimerDrift(s) {
+    if (!s || roomState.isHost) return;
+    if (Date.now() - roomState.lastTimerActivityAt < ROOM_SYNC_GUARD_MS) return;
+    const t = uiState.timer;
+    if (t.running && t.remainingSeconds <= 3) return;
+    if (s.running && s.remainingMs <= 3000) return;
+    if (timerDiffersFromSnapshot(s)) applyTimerSnapshot(s);
+  }
+
+  // Eski sürüm mesajları için (state alanı yoksa) veri alanından görüntü üret
+  function legacyTimerSnapshot(action, data) {
+    const t = uiState.timer;
+    const num = (v, fb) => (typeof v === "number" ? v : fb);
+    const total = num(data.totalSeconds, t.totalSeconds);
+    return {
+      mode: data.mode || t.mode,
+      totalSeconds: total,
+      remainingSeconds: num(data.remainingSeconds, action === "PAUSE" ? t.remainingSeconds : total),
+      running: action === "START"
+    };
+  }
+
+  function broadcastTimerAction(action, data = {}) {
+    if (!roomState.roomCode) return;
+    roomState.lastTimerActivityAt = Date.now();
+    sendRoomMessage(makeRoomMessage("TIMER", { action, data, state: getTimerSnapshot() }));
+  }
+
+  // false dönerse host bu mesajı diğer misafirlere iletmez
+  function handleIncomingTimerAction(msg) {
+    if (!msg) return;
+    const action = msg.action;
+    const data = msg.data || {};
+    const sender = msg.name || msg.sender || "Arkadaşın";
+    const snap = msg.state || legacyTimerSnapshot(action, data);
+
+    if (action === "SWITCH_MODE" && data.reason === "complete") {
+      // Herkesin sayacı kendi başına biter; bu mesaj yalnızca geride kalanı yakalar.
+      const t = uiState.timer;
+      const nearEnd = t.running && t.mode === data.fromMode && t.remainingSeconds <= 5;
+      if (roomState.isHost) {
+        if (nearEnd) handleTimerComplete(false);
+        return false;
+      }
+      if (nearEnd) {
+        handleTimerComplete(true);
+        applyTimerSnapshot(snap);
+        return;
+      }
+      if (!t.running && t.mode === snap.mode && t.totalSeconds === snap.totalSeconds) return;
+      applyTimerSnapshot(snap);
+      return;
+    }
+
+    applyTimerSnapshot(snap);
+    if (action === "START") {
+      showToast(`▶️ ${sender} sayacı başlattı!`);
+    } else if (action === "PAUSE") {
+      showToast(`⏸️ ${sender} sayacı duraklattı.`);
+    } else if (action === "RESET") {
+      showToast(`🔄 ${sender} sayacı sıfırladı.`);
+    } else if (action === "SWITCH_MODE") {
+      showToast(`🔀 ${sender} oturumu değiştirdi: ${snap.mode === "study" ? "Ders" : "Mola"}`);
+    }
+  }
+
+  // ---------- Mesaj işleyicileri ----------
+  // Host yalnızca PING/PONG ve ROOM_RELAY_TYPES türlerini misafirden kabul eder.
+  const ROOM_MESSAGE_HANDLERS = {
+    TIMER(msg) {
+      return handleIncomingTimerAction(msg);
+    },
+    PING(msg, conn) {
+      sendTo(conn, makeRoomMessage("PONG", { t: msg.t }));
+      if (!roomState.isHost && msg.timer) maybeCorrectTimerDrift(msg.timer);
+    },
+    PONG() {},
+    WELCOME(msg) {
+      if (roomState.isHost) return;
+      clearTimeout(roomState.connectTimeoutTimer);
+      clearTimeout(roomState.reconnectTimer);
+      roomState.connectTimeoutTimer = null;
+      roomState.reconnectTimer = null;
+      const wasReconnecting = roomState.everConnected;
+      roomState.status = "connected";
+      roomState.isWaiting = false;
+      roomState.everConnected = true;
+      roomState.reconnectStartedAt = 0;
+      roomState.reconnectAttempt = 0;
+      roomState.hostName = sanitizeRoomName(msg.hostName || msg.name);
+      roomState.connectedPeerName = roomState.hostName;
+      roomState.participants = sanitizeParticipants(msg.participants);
+      // Host yeniden açıldıysa geçmişi boştur; o durumda yerel sohbeti koru
+      if (Array.isArray(msg.chat) && msg.chat.length > 0) {
+        roomState.chat = msg.chat.slice(-ROOM_CHAT_MAX_COUNT).map(sanitizeChatEntry).filter(Boolean);
+        renderRoomChat();
+      }
+      // Durum satırı: bu sekme kendi durumunu biliyorsa o geçerli, bilmiyorsa host'takini benimse
+      const mine = roomState.participants.find((p) => p.id === getRoomClientId());
+      const hostWork = mine ? mine.work : null;
+      if (roomState.myWorkKnown) {
+        if (!sameWork(hostWork, roomState.myWork)) {
+          sendRoomMessage(makeRoomMessage("STATUS", { work: roomState.myWork }));
+        }
+      } else if (hostWork) {
+        roomState.myWork = hostWork;
+        roomState.myWorkKnown = true;
+        saveMyWork();
+      }
+      applyTimerSnapshot(msg.timer);
+      saveRoomSession("guest");
+      updateRoomUI();
+      showToast(wasReconnecting
+        ? "✅ Yeniden bağlandın! Sayaç odayla eşitlendi."
+        : `🎉 ${roomState.hostName} odasına bağlandın! Sayaç eşitlendi.`);
+    },
+    PARTICIPANTS(msg) {
+      if (roomState.isHost) return;
+      roomState.participants = sanitizeParticipants(msg.participants);
+      updateRoomUI();
+    },
+    // Yalnızca host işler; durumu saklar ve PARTICIPANTS ile dağıtır
+    STATUS(msg) {
+      if (!roomState.isHost) return false;
+      const entry = roomState.guests.get(msg.from);
+      if (!entry) return false;
+      const work = sanitizeWork(msg.work);
+      if (!sameWork(entry.work || null, work)) {
+        entry.work = work;
+        broadcastParticipants();
+        updateRoomUI();
+      }
+      return false;
+    },
+    CHAT(msg) {
+      const text = sanitizeChatText(msg.text);
+      if (!text) return false;
+      if (roomState.isHost) {
+        const entry = roomState.guests.get(msg.from);
+        if (!entry) return false;
+        const now = Date.now();
+        if (now - (entry.lastChatAt || 0) < ROOM_CHAT_MIN_INTERVAL_MS) return false;
+        if (isRoomChatLocked()) return false; // ders sırasında sohbet kapalı
+        entry.lastChatAt = now;
+        msg.text = text;
+        msg.ts = now;
+      }
+      pushRoomChat(sanitizeChatEntry(msg));
+    },
+    ROOM_CLOSED(msg) {
+      if (roomState.isHost) return;
+      teardownRoom({ notifyPeers: false });
+      clearRoomSession();
+      showToast(`🛑 ${msg.name || "Oda kurucusu"} odayı kapattı. Bireysel moda dönüldü.`);
+    },
+    ROOM_FULL(msg) {
+      if (roomState.isHost) return;
+      teardownRoom({ notifyPeers: false });
+      clearRoomSession();
+      showToast(`⚠️ Oda dolu (en fazla ${msg.maxGuests || ROOM_MAX_GUESTS} arkadaş katılabilir).`);
+    },
+    REPLACED() {
+      if (roomState.isHost) return;
+      teardownRoom({ notifyPeers: false });
+      clearRoomSession();
+      showToast("ℹ️ Bu odaya başka bir sekmeden bağlandın, bu sekme odadan çıktı.");
+    }
+  };
+  const ROOM_HOST_ACCEPTS = new Set(["PING", "PONG"]);
+
+  // ---------- Kalp atışı ----------
+  function startRoomHeartbeat() {
+    if (roomState.heartbeatTimer) return;
+    roomState.heartbeatTimer = setInterval(roomHeartbeatTick, ROOM_HEARTBEAT_MS);
+  }
+
+  function roomHeartbeatTick() {
+    if (!roomState.roomCode) return;
+    const now = Date.now();
+    const peer = roomState.peer;
+    // 'disconnected' olayı kaçarsa güvenlik ağı
+    if (peer && !peer.destroyed && peer.disconnected && !roomState.signalingRetryTimer) {
+      scheduleSignalingReconnect(peer, roomState.sessionToken);
+    }
+    if (roomState.isHost) {
+      const timer = getTimerSnapshot();
+      roomState.guests.forEach((entry, id) => {
+        if (!entry.conn) return;
+        if (now - entry.lastSeen > ROOM_SILENCE_TIMEOUT_MS) {
+          hostGuestConnectionLost(id, entry.conn);
+          return;
+        }
+        sendTo(entry.conn, makeRoomMessage("PING", { t: now, timer }));
+      });
+    } else if (roomState.status === "connected") {
+      if (now - roomState.lastSeen > ROOM_SILENCE_TIMEOUT_MS) {
+        guestConnectionLost(roomState.conn, "silence");
+        return;
+      }
+      sendTo(roomState.conn, makeRoomMessage("PING", { t: now }));
+    }
+  }
+
+  // Sinyal sunucusu bağlantısı koptuğunda (host & misafir) geri al
+  function scheduleSignalingReconnect(peer, token) {
+    if (isRoomTokenStale(token) || roomState.peer !== peer || peer.destroyed) return;
+    clearTimeout(roomState.signalingRetryTimer);
+    const attempt = roomState.signalingRetryAttempt++;
+    const delay = Math.min(30000, 1000 * Math.pow(2, attempt)) + Math.floor(Math.random() * 500);
+    roomState.signalingRetryTimer = setTimeout(() => {
+      roomState.signalingRetryTimer = null;
+      if (isRoomTokenStale(token) || roomState.peer !== peer || peer.destroyed || !peer.disconnected) return;
+      try { peer.reconnect(); } catch (err) { console.warn("PeerJS reconnect error:", err); }
+    }, delay);
+  }
+
+  function attachSignalingHandlers(peer, token) {
+    peer.on("disconnected", () => {
+      if (isRoomTokenStale(token) || roomState.peer !== peer || peer.destroyed) return;
+      scheduleSignalingReconnect(peer, token);
+      updateRoomUI();
+    });
+  }
+
+  function roomNudge() {
+    if (!roomState.roomCode) return;
+    const peer = roomState.peer;
+    if (peer && !peer.destroyed && peer.disconnected) {
+      clearTimeout(roomState.signalingRetryTimer);
+      roomState.signalingRetryTimer = null;
+      try { peer.reconnect(); } catch (_) {}
+    }
+    if (!roomState.isHost && roomState.status === "reconnecting" && roomState.reconnectTimer) {
+      clearTimeout(roomState.reconnectTimer);
+      roomState.reconnectTimer = null;
+      guestAttemptConnect(roomState.sessionToken);
+    }
+    roomHeartbeatTick();
+  }
+
+  // ---------- Oturumu kapatma ----------
+  function teardownRoom({ notifyPeers = false } = {}) {
+    roomState.sessionToken++;
+    clearInterval(roomState.heartbeatTimer);
+    [roomState.reconnectTimer, roomState.connectTimeoutTimer, roomState.signalingRetryTimer, roomState.hostOpenTimer].forEach((t) => clearTimeout(t));
+    roomState.heartbeatTimer = null;
+    roomState.reconnectTimer = null;
+    roomState.connectTimeoutTimer = null;
+    roomState.signalingRetryTimer = null;
+    roomState.hostOpenTimer = null;
+
+    const conns = [];
+    if (roomState.isHost) {
+      const closedMsg = makeRoomMessage("ROOM_CLOSED");
+      roomState.guests.forEach((entry) => {
+        clearTimeout(entry.graceTimer);
+        if (entry.conn) {
+          if (notifyPeers) sendTo(entry.conn, closedMsg);
+          conns.push(entry.conn);
+        }
+      });
+    } else if (roomState.conn) {
+      if (notifyPeers) sendTo(roomState.conn, makeRoomMessage("BYE"));
+      conns.push(roomState.conn);
+    }
+    const peer = roomState.peer;
+    const finish = () => {
+      conns.forEach((c) => { try { c.close(); } catch (_) {} });
+      if (peer) { try { peer.destroy(); } catch (_) {} }
+    };
+    if (notifyPeers && conns.length) setTimeout(finish, 300);
+    else finish();
+
+    roomState.peer = null;
+    roomState.conn = null;
+    roomState.isHost = false;
+    roomState.isWaiting = false;
+    roomState.roomCode = null;
+    roomState.connectedPeerName = null;
+    roomState.status = "idle";
+    roomState.guests = new Map();
+    roomState.participants = [];
+    roomState.hostName = null;
+    roomState.everConnected = false;
+    roomState.reconnectStartedAt = 0;
+    roomState.reconnectAttempt = 0;
+    roomState.signalingRetryAttempt = 0;
+    roomState.hostOpenFailures = 0;
+    roomState.reclaiming = false;
+    roomState.myWork = null;
+    roomState.myWorkKnown = false;
+    roomState.chat = [];
+    roomState.chatUnread = 0;
+    renderRoomChat();
+    updateRoomUI();
+  }
+
+  // ---------- HOST ----------
+  function getParticipantList() {
+    const list = [{ id: getRoomClientId(), name: roomState.myUserName, isHost: true, status: "connected", work: roomState.myWork }];
+    roomState.guests.forEach((entry, id) => {
+      list.push({ id, name: entry.name, isHost: false, status: entry.status, work: entry.work || null });
+    });
+    return list;
+  }
+
+  function broadcastParticipants() {
+    if (!roomState.isHost) return;
+    sendRoomMessage(makeRoomMessage("PARTICIPANTS", { participants: getParticipantList() }));
+  }
+
+  function hostAcceptGuest(conn, msg) {
+    const clientId = String(msg.from || conn.peer || "").slice(0, 64);
+    if (!clientId) return null;
+    const name = sanitizeRoomName(msg.name);
+    let entry = roomState.guests.get(clientId);
+    if (!entry && roomState.guests.size >= ROOM_MAX_GUESTS) {
+      sendTo(conn, makeRoomMessage("ROOM_FULL", { maxGuests: ROOM_MAX_GUESTS }));
+      setTimeout(() => { try { conn.close(); } catch (_) {} }, 300);
+      return null;
+    }
+    const wasReconnecting = !!(entry && entry.status === "reconnecting");
+    const isNew = !entry;
+    if (entry && entry.conn && entry.conn !== conn) {
+      // Aynı kişi yeni bağlantıyla geldi: eskisini (kimlik kontrolü sayesinde) etkisizce kapat
+      const old = entry.conn;
+      entry.conn = null;
+      sendTo(old, makeRoomMessage("REPLACED"));
+      setTimeout(() => { try { old.close(); } catch (_) {} }, 300);
+    }
+    if (!entry) {
+      entry = { joinedAt: Date.now(), graceTimer: null, work: null, lastChatAt: 0 };
+      roomState.guests.set(clientId, entry);
+    }
+    clearTimeout(entry.graceTimer);
+    entry.graceTimer = null;
+    entry.conn = conn;
+    entry.name = name;
+    entry.status = "connected";
+    entry.lastSeen = Date.now();
+    roomState.isWaiting = false;
+    roomState.connectedPeerName = name;
+
+    sendTo(conn, makeRoomMessage("WELCOME", {
+      hostName: roomState.myUserName,
+      participants: getParticipantList(),
+      timer: getTimerSnapshot(),
+      maxGuests: ROOM_MAX_GUESTS,
+      chat: roomState.chat.slice(-ROOM_CHAT_WELCOME_COUNT)
+    }));
+    broadcastParticipants();
+    updateRoomUI();
+    if (isNew) showToast(`👋 ${name} odaya katıldı!`);
+    else if (wasReconnecting) showToast(`🔄 ${name} tekrar bağlandı.`);
+    return clientId;
+  }
+
+  function hostGuestConnectionLost(clientId, conn) {
+    const entry = roomState.guests.get(clientId);
+    if (!entry || entry.conn !== conn) return; // eski bağlantı: yok say
+    entry.conn = null;
+    entry.status = "reconnecting";
+    try { conn.close(); } catch (_) {}
+    clearTimeout(entry.graceTimer);
+    entry.graceTimer = setTimeout(() => {
+      const e = roomState.guests.get(clientId);
+      if (e && e === entry && !e.conn) hostRemoveGuest(clientId, "timeout");
+    }, ROOM_GUEST_GRACE_MS);
+    broadcastParticipants();
+    updateRoomUI();
+  }
+
+  function hostRemoveGuest(clientId, reason) {
+    const entry = roomState.guests.get(clientId);
+    if (!entry) return;
+    roomState.guests.delete(clientId);
+    clearTimeout(entry.graceTimer);
+    if (entry.conn) {
+      const c = entry.conn;
+      entry.conn = null;
+      setTimeout(() => { try { c.close(); } catch (_) {} }, 200);
+    }
+    if (roomState.guests.size === 0) {
+      roomState.isWaiting = true;
+      roomState.connectedPeerName = null;
+    }
+    broadcastParticipants();
+    updateRoomUI();
+    if (reason === "left") showToast(`🚪 ${entry.name} odadan ayrıldı.`);
+    else showToast(`ℹ️ ${entry.name} geri bağlanamadı, katılımcı listesinden çıkarıldı.`);
+  }
+
+  function hostHandleConnection(conn, token) {
+    let clientId = null;
+    conn.on("data", (raw) => {
+      if (isRoomTokenStale(token)) return;
+      const msg = raw && typeof raw === "object" ? raw : null;
+      if (!msg || typeof msg.type !== "string") return;
+      if (msg.type === "HELLO") {
+        if (!clientId) clientId = hostAcceptGuest(conn, msg);
+        return;
+      }
+      if (!clientId) return;
+      const entry = roomState.guests.get(clientId);
+      if (!entry || entry.conn !== conn) return;
+      entry.lastSeen = Date.now();
+      // Göndericiyi host'un bildiği kimlikle damgala
+      msg.from = clientId;
+      msg.name = entry.name;
+      if (msg.type === "BYE") {
+        hostRemoveGuest(clientId, "left");
+        return;
+      }
+      const relay = ROOM_RELAY_TYPES.has(msg.type);
+      if (!relay && !ROOM_HOST_ACCEPTS.has(msg.type)) return;
+      const handler = ROOM_MESSAGE_HANDLERS[msg.type];
+      const result = handler ? handler(msg, conn) : undefined;
+      if (relay && result !== false) sendRoomMessage(msg, clientId);
+    });
+    const onGone = () => {
+      if (isRoomTokenStale(token) || !clientId) return;
+      hostGuestConnectionLost(clientId, conn);
+    };
+    conn.on("close", onGone);
+    conn.on("error", (err) => {
+      console.warn("Peer connection error:", err);
+      onGone();
+    });
+    setTimeout(() => {
+      if (!clientId && !isRoomTokenStale(token)) { try { conn.close(); } catch (_) {} }
+    }, ROOM_CONNECT_TIMEOUT_MS);
+  }
+
+  function hostOpenFailed(token, message) {
+    if (isRoomTokenStale(token)) return;
+    roomState.hostOpenFailures++;
+    const windowOk = roomState.reclaiming
+      ? Date.now() - roomState.reclaimStartedAt < ROOM_HOST_RECLAIM_WINDOW_MS
+      : roomState.hostOpenFailures <= 4;
+    if (windowOk) {
+      clearTimeout(roomState.hostOpenTimer);
+      roomState.hostOpenTimer = setTimeout(() => openHostPeer(token), Math.min(8000, 1500 * roomState.hostOpenFailures));
+      updateRoomUI();
+      return;
+    }
+    teardownRoom({ notifyPeers: false });
+    clearRoomSession();
+    showToast(message);
+  }
+
+  function openHostPeer(token) {
+    if (isRoomTokenStale(token)) return;
+    roomState.hostOpenTimer = null;
+    const code = roomState.roomCode;
+    let peer;
+    try {
+      peer = new Peer(roomPeerIdFor(code));
+    } catch (e) {
+      console.warn("Peer error:", e);
+      teardownRoom({ notifyPeers: false });
+      clearRoomSession();
+      showToast("⚠️ Oda oluşturulurken hata meydana geldi.");
+      return;
+    }
+    roomState.peer = peer;
+    attachSignalingHandlers(peer, token);
+
+    peer.on("open", () => {
+      if (isRoomTokenStale(token) || roomState.peer !== peer) return;
+      roomState.signalingRetryAttempt = 0;
+      clearTimeout(roomState.signalingRetryTimer);
+      roomState.signalingRetryTimer = null;
+      if (roomState.status === "opening") {
+        roomState.status = "open";
+        roomState.hostOpenFailures = 0;
+        saveRoomSession("host");
+        showToast(roomState.reclaiming
+          ? `🏠 ${code} odası yeniden açıldı. Arkadaşların otomatik olarak geri bağlanacak.`
+          : `🏠 ${code} kodlu oda kuruldu! Arkadaşlarını davet edebilirsin.`);
+        roomState.reclaiming = false;
+      }
+      updateRoomUI();
+    });
+
+    peer.on("connection", (conn) => {
+      if (isRoomTokenStale(token) || roomState.peer !== peer) {
+        try { conn.close(); } catch (_) {}
+        return;
+      }
+      hostHandleConnection(conn, token);
+    });
+
+    peer.on("error", (err) => {
+      if (isRoomTokenStale(token) || roomState.peer !== peer) return;
+      console.warn("PeerJS host error:", err);
+      const type = err && err.type;
+      const opening = roomState.status === "opening";
+      if (type === "unavailable-id") {
+        if (!opening) return; // açık odada: 'disconnected' akışı tekrar dener
+        try { peer.destroy(); } catch (_) {}
+        roomState.peer = null;
+        if (roomState.reclaiming) {
+          hostOpenFailed(token, "⚠️ Önceki oda geri açılamadı. Yeni bir oda kurabilirsin.");
+          return;
+        }
+        roomState.createAttempt++;
+        if (roomState.createAttempt < 5) {
+          roomState.roomCode = generateRoomCode();
+          updateRoomUI();
+          openHostPeer(token);
+        } else {
+          teardownRoom({ notifyPeers: false });
+          clearRoomSession();
+          showToast("⚠️ Oda kurulamadı. Lütfen tekrar deneyin.");
+        }
+        return;
+      }
+      if (type === "browser-incompatible" || type === "invalid-id" || type === "invalid-key" || type === "ssl-unavailable") {
+        teardownRoom({ notifyPeers: false });
+        clearRoomSession();
+        showToast("⚠️ Oda kurulamadı. Tarayıcın bu özelliği desteklemiyor olabilir.");
+        return;
+      }
+      if (opening && peer.destroyed) {
+        roomState.peer = null;
+        hostOpenFailed(token, "⚠️ Sunucuya ulaşılamadı. İnternet bağlantını kontrol edip tekrar dene.");
+      }
+      // Diğer hatalar (network, webrtc, peer-unavailable...) odayı kapatmaz.
+    });
+  }
+
+  function createPomodoroRoom(opts = {}) {
+    if (typeof Peer === "undefined") {
+      showToast("⚠️ Bağlantı kütüphanesi yüklenemedi. İnternet bağlantınızı kontrol edin.");
+      return;
+    }
+    if (opts.name) roomState.myUserName = sanitizeRoomName(opts.name);
+    else readRoomNameInput();
+    if (roomState.roomCode) teardownRoom({ notifyPeers: true });
+
+    const token = ++roomState.sessionToken;
+    roomState.isHost = true;
+    roomState.isWaiting = true;
+    roomState.status = "opening";
+    roomState.guests = new Map();
+    roomState.participants = [];
+    roomState.connectedPeerName = null;
+    roomState.createAttempt = 0;
+    roomState.hostOpenFailures = 0;
+    roomState.signalingRetryAttempt = 0;
+    roomState.reclaiming = !!opts.reclaimCode;
+    roomState.reclaimStartedAt = Date.now();
+    roomState.roomCode = opts.reclaimCode || generateRoomCode();
+    loadMyWork(roomState.roomCode);
+    updateRoomUI();
+    startRoomHeartbeat();
+    openHostPeer(token);
+  }
+
+  // ---------- MİSAFİR ----------
+  function joinPomodoroRoom(inputCode, opts = {}) {
+    if (typeof Peer === "undefined") {
+      showToast("⚠️ Bağlantı kütüphanesi yüklenemedi. İnternet bağlantınızı kontrol edin.");
+      return;
+    }
+    if (opts.name) roomState.myUserName = sanitizeRoomName(opts.name);
+    else readRoomNameInput();
+
+    const code = normalizeRoomCode(inputCode);
+    if (!code || code.length < ROOM_CODE_PREFIX.length + 3) {
+      showToast("⚠️ Lütfen arkadaşınızın verdiği oda kodunu girin.");
+      return;
+    }
+    if (roomState.roomCode) teardownRoom({ notifyPeers: true });
+
+    const token = ++roomState.sessionToken;
+    roomState.isHost = false;
+    roomState.isWaiting = true;
+    roomState.roomCode = code;
+    loadMyWork(code);
+    roomState.connectedPeerName = null;
+    roomState.participants = [];
+    roomState.hostName = null;
+    roomState.everConnected = !!opts.resume;
+    roomState.status = opts.resume ? "reconnecting" : "connecting";
+    roomState.reconnectStartedAt = Date.now();
+    roomState.reconnectAttempt = 0;
+    roomState.signalingRetryAttempt = 0;
+    saveRoomSession("guest");
+    startRoomHeartbeat();
+    updateRoomUI();
+    guestAttemptConnect(token);
+  }
+
+  function guestArmConnectTimeout(token) {
+    clearTimeout(roomState.connectTimeoutTimer);
+    roomState.connectTimeoutTimer = setTimeout(() => {
+      roomState.connectTimeoutTimer = null;
+      if (isRoomTokenStale(token) || roomState.status === "connected") return;
+      guestConnectionLost(roomState.conn, "timeout");
+    }, ROOM_CONNECT_TIMEOUT_MS);
+  }
+
+  function guestAttemptConnect(token) {
+    if (isRoomTokenStale(token)) return;
+    clearTimeout(roomState.reconnectTimer);
+    roomState.reconnectTimer = null;
+    const peer = roomState.peer;
+    if (!peer || peer.destroyed) {
+      guestCreatePeer(token);
+      return;
+    }
+    if (peer.disconnected) {
+      try { peer.reconnect(); } catch (_) {
+        try { peer.destroy(); } catch (__) {}
+        roomState.peer = null;
+        guestCreatePeer(token);
+        return;
+      }
+      guestArmConnectTimeout(token); // 'open' olayı bağlantıyı başlatır
+      return;
+    }
+    if (peer.open) guestConnectToHost(token);
+    else guestArmConnectTimeout(token);
+  }
+
+  function guestCreatePeer(token) {
+    let peer;
+    try {
+      peer = new Peer();
+    } catch (e) {
+      console.warn("Peer join error:", e);
+      guestConnectionLost(null, "peer");
+      return;
+    }
+    roomState.peer = peer;
+    attachSignalingHandlers(peer, token);
+    peer.on("open", () => {
+      if (isRoomTokenStale(token) || roomState.peer !== peer) return;
+      roomState.signalingRetryAttempt = 0;
+      clearTimeout(roomState.signalingRetryTimer);
+      roomState.signalingRetryTimer = null;
+      // Sadece sinyal yeniden bağlandıysa mevcut veri bağlantısını bozma
+      if (roomState.status !== "connected") guestConnectToHost(token);
+    });
+    peer.on("error", (err) => {
+      if (isRoomTokenStale(token) || roomState.peer !== peer) return;
+      console.warn("PeerJS join error:", err);
+      const type = err && err.type;
+      if (type === "browser-incompatible" || type === "ssl-unavailable") {
+        teardownRoom({ notifyPeers: false });
+        clearRoomSession();
+        showToast("⚠️ Tarayıcın ortak oda özelliğini desteklemiyor.");
+        return;
+      }
+      // peer-unavailable (host henüz yok), network, webrtc...: bağlı değilsek yeniden dene
+      if (roomState.status !== "connected") guestConnectionLost(roomState.conn, type || "error");
+    });
+    guestArmConnectTimeout(token);
+  }
+
+  function guestConnectToHost(token) {
+    if (isRoomTokenStale(token)) return;
+    const peer = roomState.peer;
+    if (!peer || !peer.open) return;
+    const old = roomState.conn;
+    roomState.conn = null;
+    if (old) { try { old.close(); } catch (_) {} }
+
+    const conn = peer.connect(roomPeerIdFor(roomState.roomCode), { reliable: true });
+    roomState.conn = conn;
+    guestArmConnectTimeout(token);
+    const isCurrent = () => !isRoomTokenStale(token) && roomState.conn === conn;
+
+    conn.on("open", () => {
+      if (!isCurrent()) return;
+      roomState.lastSeen = Date.now();
+      sendTo(conn, makeRoomMessage("HELLO", { resume: roomState.everConnected }));
+    });
+    conn.on("data", (raw) => {
+      if (!isCurrent()) return;
+      roomState.lastSeen = Date.now();
+      const msg = raw && typeof raw === "object" ? raw : null;
+      if (!msg || typeof msg.type !== "string" || msg.type === "HELLO" || msg.type === "BYE") return;
+      const handler = ROOM_MESSAGE_HANDLERS[msg.type];
+      if (handler) handler(msg, conn);
+    });
+    conn.on("close", () => {
+      if (!isCurrent()) return;
+      guestConnectionLost(conn, "close");
+    });
+    conn.on("error", (err) => {
+      console.warn("Peer connection error:", err);
+      if (!isCurrent()) return;
+      guestConnectionLost(conn, "error");
+    });
+  }
+
+  function guestConnectionLost(conn, reason) {
+    if (roomState.isHost || !roomState.roomCode) return;
+    if (conn && roomState.conn !== conn) return; // eski bağlantı
+    clearTimeout(roomState.connectTimeoutTimer);
+    roomState.connectTimeoutTimer = null;
+    const c = roomState.conn;
+    roomState.conn = null;
+    if (c) { try { c.close(); } catch (_) {} }
+    // Sinyal hiç açılamadıysa bir sonraki denemede yeni peer kur
+    const peer = roomState.peer;
+    if (peer && !peer.open && !peer.disconnected && reason === "timeout") {
+      try { peer.destroy(); } catch (_) {}
+      roomState.peer = null;
+    }
+    scheduleGuestReconnect();
+  }
+
+  function scheduleGuestReconnect() {
+    const token = roomState.sessionToken;
+    if (roomState.reconnectTimer) return;
+    const now = Date.now();
+    if (roomState.status === "connected") {
+      // Bağlıyken koptu: yeniden bağlanma penceresi şimdi başlar
+      roomState.status = "reconnecting";
+      roomState.isWaiting = true;
+      roomState.reconnectStartedAt = now;
+      roomState.reconnectAttempt = 0;
+      showToast("📡 Bağlantı koptu, yeniden bağlanılıyor…");
+    }
+    if (!roomState.reconnectStartedAt) roomState.reconnectStartedAt = now;
+    const windowMs = roomState.everConnected ? ROOM_RECONNECT_WINDOW_MS : ROOM_INITIAL_JOIN_WINDOW_MS;
+    if (now - roomState.reconnectStartedAt > windowMs) {
+      const everConnected = roomState.everConnected;
+      teardownRoom({ notifyPeers: false });
+      clearRoomSession();
+      showToast(everConnected
+        ? "⚠️ Odaya yeniden bağlanılamadı. Bireysel moda dönüldü."
+        : "⚠️ Odaya bağlanılamadı. Kodu kontrol et; oda kurucusunun sayfası açık olmalı.");
+      return;
+    }
+    updateRoomUI();
+    const delay = Math.min(10000, 1000 * Math.pow(2, roomState.reconnectAttempt)) + Math.floor(Math.random() * 500);
+    roomState.reconnectAttempt++;
+    roomState.reconnectTimer = setTimeout(() => {
+      roomState.reconnectTimer = null;
+      guestAttemptConnect(token);
+    }, delay);
+  }
+
+  // ---------- Dışa açık eylemler ----------
+  function closePomodoroRoom() {
+    teardownRoom({ notifyPeers: true });
+    clearRoomSession();
+    showToast("🛑 Oda kapatıldı. Bireysel çalışma moduna dönüldü.");
+  }
+
+  function leavePomodoroRoom(notify = true) {
+    teardownRoom({ notifyPeers: true });
+    clearRoomSession();
+    if (notify) {
+      showToast("🚪 Odadan ayrıldınız. Bireysel moda dönüldü.");
+    }
+  }
+
+  function resumeRoomSession() {
+    const s = loadRoomSession();
+    if (!s || roomState.roomCode) return;
+    if (s.role === "host") {
+      createPomodoroRoom({ reclaimCode: s.code, name: s.name });
+    } else {
+      joinPomodoroRoom(s.code, { resume: true, name: s.name });
+    }
+  }
+
   function initRoomState() {
+    getRoomClientId();
     const savedName = localStorage.getItem("pusulapp_user_name");
     if (savedName) {
       roomState.myUserName = savedName;
@@ -3532,262 +5258,27 @@
       if (inp) inp.value = savedName;
     }
 
-    // URL parametresinde oda kodu var mı kontrol et (?room=PUSULA-XXX)
+    window.addEventListener("online", roomNudge);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") roomNudge();
+    });
+
+    // URL parametresinde oda kodu var mı kontrol et (?room=PUSULA-XXXXX)
     try {
       const urlParams = new URLSearchParams(window.location.search);
       const roomParam = urlParams.get("room");
-      if (roomParam) {
+      const session = loadRoomSession();
+      if (roomParam && !(session && session.code === normalizeRoomCode(roomParam))) {
+        const code = normalizeRoomCode(roomParam);
         setTimeout(() => {
           switchView("timer");
           openModal("modalRoomConnect");
           const inp = document.getElementById("inputRoomCode");
-          if (inp) inp.value = roomParam.trim().toUpperCase();
-          showToast(`🔑 ${roomParam.toUpperCase()} oda kodu hazır! İsim yazıp "Odaya Katıl"a basabilirsin.`);
+          if (inp) inp.value = code;
+          showToast(`🔑 ${code} oda kodu hazır! İsim yazıp "Odaya Katıl"a basabilirsin.`);
         }, 500);
       }
     } catch (_) {}
-  }
-
-  function broadcastTimerAction(action, data = {}) {
-    if (roomState.conn && roomState.conn.open) {
-      try {
-        roomState.conn.send({
-          type: "TIMER_SYNC",
-          action,
-          data,
-          sender: roomState.myUserName,
-          timestamp: Date.now()
-        });
-      } catch (err) {
-        console.warn("PeerJS send error:", err);
-      }
-    }
-  }
-
-  function handleIncomingTimerAction(msg) {
-    if (!msg || msg.type !== "TIMER_SYNC") return;
-
-    if (msg.action === "START") {
-      uiState.timer.running = true;
-      uiState.timer.mode = msg.data.mode || uiState.timer.mode;
-      uiState.timer.totalSeconds = msg.data.totalSeconds || uiState.timer.totalSeconds;
-      uiState.timer.remainingSeconds = msg.data.remainingSeconds || uiState.timer.remainingSeconds;
-      uiState.timer.targetTimestamp = Date.now() + uiState.timer.remainingSeconds * 1000;
-      updateTimerDOM();
-      showToast(`▶️ ${msg.sender || "Arkadaşın"} sayacı başlattı!`);
-    } else if (msg.action === "PAUSE") {
-      uiState.timer.running = false;
-      uiState.timer.remainingSeconds = msg.data.remainingSeconds || uiState.timer.remainingSeconds;
-      uiState.timer.targetTimestamp = null;
-      updateTimerDOM();
-      showToast(`⏸️ ${msg.sender || "Arkadaşın"} sayacı duraklattı.`);
-    } else if (msg.action === "RESET") {
-      uiState.timer.running = false;
-      uiState.timer.targetTimestamp = null;
-      uiState.timer.mode = msg.data.mode || uiState.timer.mode;
-      uiState.timer.totalSeconds = msg.data.totalSeconds;
-      uiState.timer.remainingSeconds = msg.data.remainingSeconds;
-      updateTimerDOM();
-      showToast(`🔄 ${msg.sender || "Arkadaşın"} sayacı sıfırladı.`);
-    } else if (msg.action === "SWITCH_MODE") {
-      switchTimerMode(msg.data.mode, msg.data.customMinutes, false);
-      showToast(`🔀 ${msg.sender || "Arkadaşın"} oturumu değiştirdi: ${msg.data.mode === "study" ? "Ders" : "Mola"}`);
-    }
-  }
-
-  function setupPeerConnection(conn) {
-    roomState.conn = conn;
-
-    conn.on("open", () => {
-      // Bağlantı başarılı!
-      roomState.isWaiting = false;
-      conn.send({
-        type: "HANDSHAKE",
-        name: roomState.myUserName
-      });
-      updateRoomUI();
-      showToast(`🎉 Ortak Çalışma Odasına bağlandınız!`);
-    });
-
-    conn.on("data", (data) => {
-      if (data.type === "HANDSHAKE") {
-        roomState.isWaiting = false;
-        roomState.connectedPeerName = data.name || "Arkadaşın";
-        updateRoomUI();
-        showToast(`👋 ${roomState.connectedPeerName} odaya katıldı!`);
-      } else if (data.type === "TIMER_SYNC") {
-        handleIncomingTimerAction(data);
-      } else if (data.type === "ROOM_CLOSED") {
-        showToast(`🛑 ${data.sender || "Oda kurucusu"} odayı kapattı.`);
-        leavePomodoroRoom(false);
-      }
-    });
-
-    conn.on("close", () => {
-      showToast("ℹ️ Arkadaşınız odadan ayrıldı.");
-      if (roomState.isHost) {
-        roomState.isWaiting = true;
-        roomState.conn = null;
-        roomState.connectedPeerName = null;
-        updateRoomUI();
-      } else {
-        leavePomodoroRoom(false);
-      }
-    });
-
-    conn.on("error", (err) => {
-      console.warn("Peer connection error:", err);
-      showToast("⚠️ Bağlantı hatası oluştu.");
-      updateRoomUI();
-    });
-  }
-
-  function createPomodoroRoom() {
-    if (typeof Peer === "undefined") {
-      showToast("⚠️ Bağlantı kütüphanesi yüklenemedi. İnternet bağlantınızı kontrol edin.");
-      return;
-    }
-
-    const nameInput = document.getElementById("inputRoomUserName");
-    const name = (nameInput && nameInput.value.trim()) || "Ben";
-    roomState.myUserName = name;
-    localStorage.setItem("pusulapp_user_name", name);
-
-    // Rastgele 6 haneli oda kodu üret
-    const randomCode = "PUSULA-" + Math.floor(100 + Math.random() * 900);
-    const peerId = "pusulapp-room-" + randomCode.toLowerCase();
-
-    if (roomState.peer) {
-      try { roomState.peer.destroy(); } catch (_) {}
-    }
-
-    roomState.isHost = true;
-    roomState.isWaiting = true;
-    roomState.roomCode = randomCode;
-    roomState.connectedPeerName = null;
-
-    updateRoomUI();
-
-    try {
-      const peer = new Peer(peerId);
-      roomState.peer = peer;
-
-      peer.on("open", () => {
-        updateRoomUI();
-        showToast(`🏠 ${randomCode} kodlu oda kuruldu! Arkadaşını davet edebilirsin.`);
-      });
-
-      peer.on("connection", (conn) => {
-        setupPeerConnection(conn);
-      });
-
-      peer.on("error", (err) => {
-        console.warn("PeerJS host error:", err);
-        if (err.type === "unavailable-id") {
-          createPomodoroRoom();
-        } else {
-          showToast("⚠️ Oda kurulamadı. Lütfen tekrar deneyin.");
-          closePomodoroRoom();
-        }
-      });
-    } catch (e) {
-      console.warn("Peer error:", e);
-      showToast("⚠️ Oda oluşturulurken hata meydana geldi.");
-      closePomodoroRoom();
-    }
-  }
-
-  function joinPomodoroRoom(inputCode) {
-    if (typeof Peer === "undefined") {
-      showToast("⚠️ Bağlantı kütüphanesi yüklenemedi. İnternet bağlantınızı kontrol edin.");
-      return;
-    }
-
-    const nameInput = document.getElementById("inputRoomUserName");
-    const name = (nameInput && nameInput.value.trim()) || "Ben";
-    roomState.myUserName = name;
-    localStorage.setItem("pusulapp_user_name", name);
-
-    const code = inputCode.trim().toUpperCase();
-    if (!code) {
-      showToast("⚠️ Lütfen arkadaşınızın verdiği oda kodunu girin.");
-      return;
-    }
-
-    const targetPeerId = "pusulapp-room-" + code.toLowerCase();
-
-    if (roomState.peer) {
-      try { roomState.peer.destroy(); } catch (_) {}
-    }
-
-    roomState.isHost = false;
-    roomState.isWaiting = true;
-    roomState.roomCode = code;
-    roomState.connectedPeerName = null;
-
-    updateRoomUI();
-
-    try {
-      const peer = new Peer();
-      roomState.peer = peer;
-
-      peer.on("open", () => {
-        const conn = peer.connect(targetPeerId, { reliable: true });
-        setupPeerConnection(conn);
-      });
-
-      peer.on("error", (err) => {
-        console.warn("PeerJS join error:", err);
-        showToast("⚠️ Odaya bağlanılamadı. Kodun doğruluğunu kontrol edin.");
-        leavePomodoroRoom(false);
-      });
-    } catch (e) {
-      console.warn("Peer join error:", e);
-      showToast("⚠️ Odaya bağlanırken hata oluştu.");
-      leavePomodoroRoom(false);
-    }
-  }
-
-  function closePomodoroRoom() {
-    if (roomState.conn && roomState.conn.open) {
-      try {
-        roomState.conn.send({
-          type: "ROOM_CLOSED",
-          sender: roomState.myUserName
-        });
-      } catch (_) {}
-      roomState.conn.close();
-    }
-    if (roomState.peer) {
-      try { roomState.peer.destroy(); } catch (_) {}
-    }
-    roomState.peer = null;
-    roomState.conn = null;
-    roomState.isHost = false;
-    roomState.isWaiting = false;
-    roomState.roomCode = null;
-    roomState.connectedPeerName = null;
-    updateRoomUI();
-    showToast("🛑 Oda kapatıldı. Bireysel çalışma moduna dönüldü.");
-  }
-
-  function leavePomodoroRoom(notify = true) {
-    if (roomState.conn) {
-      try { roomState.conn.close(); } catch (_) {}
-      roomState.conn = null;
-    }
-    if (roomState.peer) {
-      try { roomState.peer.destroy(); } catch (_) {}
-      roomState.peer = null;
-    }
-    roomState.isHost = false;
-    roomState.isWaiting = false;
-    roomState.roomCode = null;
-    roomState.connectedPeerName = null;
-    updateRoomUI();
-    if (notify) {
-      showToast("🚪 Odadan ayrıldınız. Bireysel moda dönüldü.");
-    }
   }
 
   function copyRoomInviteLink() {
@@ -3798,6 +5289,20 @@
       navigator.clipboard.writeText(text);
       showToast("🔗 Davet linki kopyalandı! Arkadaşına gönderebilirsin.");
     }
+  }
+
+  // ---------- Arayüz ----------
+  function getDisplayParticipants() {
+    if (roomState.isHost) return getParticipantList();
+    const me = getRoomClientId();
+    let list = Array.isArray(roomState.participants) ? roomState.participants.slice() : [];
+    if (roomState.status !== "connected") {
+      list = list.map((p) => Object.assign({}, p, { status: p.id === me ? "reconnecting" : "unknown" }));
+    }
+    if (!list.some((p) => p.id === me)) {
+      list.push({ id: me, name: roomState.myUserName, isHost: false, status: roomState.status === "connected" ? "connected" : "reconnecting" });
+    }
+    return list;
   }
 
   function updateRoomUI() {
@@ -3817,104 +5322,282 @@
     const btnModalClose = document.getElementById("btnModalCloseRoom");
     const btnModalLeave = document.getElementById("btnModalLeaveRoom");
 
-    const isConnected = !!(roomState.conn && roomState.conn.open && roomState.connectedPeerName);
-    const isRoomOpen = !!(roomState.roomCode && roomState.peer);
-
-    if (isConnected) {
-      // 1. TAM BAĞLI DURUM
-      if (dot) dot.className = "room-status-dot online";
-      if (text) text.innerHTML = `🟢 <strong>Ortak Oda:</strong> ${escapeHtml(roomState.connectedPeerName)} ile eşzamanlı (${roomState.roomCode})`;
-      if (partBar) {
-        partBar.classList.remove("hidden");
-        const hostTag = roomState.isHost ? `👑 ${escapeHtml(roomState.myUserName)} (Sen)` : `👑 ${escapeHtml(roomState.connectedPeerName)} (Host)`;
-        const guestTag = roomState.isHost ? `🟢 ${escapeHtml(roomState.connectedPeerName)}` : `🟢 ${escapeHtml(roomState.myUserName)} (Sen)`;
-        partBar.innerHTML = `<span class="room-chip host">${hostTag}</span><span class="room-chip peer">${guestTag}</span>`;
-      }
-      if (openBtn) {
-        openBtn.textContent = "👥 Oda & Katılımcılar";
-        openBtn.classList.remove("hidden");
-      }
-      if (copyLinkBtn) copyLinkBtn.classList.remove("hidden");
-
-      if (roomState.isHost) {
-        if (closeBtn) closeBtn.classList.remove("hidden");
-        if (leaveBtn) leaveBtn.classList.add("hidden");
-        if (btnModalClose) btnModalClose.classList.remove("hidden");
-        if (btnModalLeave) btnModalLeave.classList.add("hidden");
-      } else {
-        if (closeBtn) closeBtn.classList.add("hidden");
-        if (leaveBtn) leaveBtn.classList.remove("hidden");
-        if (btnModalClose) btnModalClose.classList.add("hidden");
-        if (btnModalLeave) btnModalLeave.classList.remove("hidden");
-      }
-
-      if (modalActiveBox) modalActiveBox.classList.remove("hidden");
-      if (modalCodeBadge) modalCodeBadge.textContent = roomState.roomCode;
-      if (modalPeerStatus) modalPeerStatus.innerHTML = `🎉 <strong>Bağlantı kuruldu!</strong> Sayaç hareketleri her iki ekranda anlık senkronize.`;
-      if (modalRoleBadge) modalRoleBadge.textContent = roomState.isHost ? "👑 Oda Kurucusu (Host)" : "👤 Katılımcı";
-      if (modalPartList) {
-        const p1 = roomState.isHost ? `👑 <strong>${escapeHtml(roomState.myUserName)}</strong> (Sen / Host)` : `👑 <strong>${escapeHtml(roomState.connectedPeerName)}</strong> (Host)`;
-        const p2 = roomState.isHost ? `🟢 <strong>${escapeHtml(roomState.connectedPeerName)}</strong> (Bağlı)` : `🟢 <strong>${escapeHtml(roomState.myUserName)}</strong> (Sen / Bağlı)`;
-        modalPartList.innerHTML = `
-          <div class="room-participant-row"><span>${p1}</span><span class="room-chip host">Aktif</span></div>
-          <div class="room-participant-row"><span>${p2}</span><span class="room-chip peer">Bağlı</span></div>
-        `;
-      }
-    } else if (isRoomOpen) {
-      // 2. ODA AÇIK AMA ARKADAŞ BEKLENİYOR
-      if (dot) dot.className = "room-status-dot waiting";
-      if (text) text.innerHTML = `🟡 <strong>Oda Açık:</strong> Arkadaşın bekleniyor (${roomState.roomCode})`;
-      if (partBar) {
-        partBar.classList.remove("hidden");
-        partBar.innerHTML = `<span class="room-chip host">👑 ${escapeHtml(roomState.myUserName)} (Hazır)</span><span class="room-chip waiting">⏳ Katılım Bekleniyor...</span>`;
-      }
-      if (openBtn) {
-        openBtn.textContent = "👥 Oda & Katılımcılar";
-        openBtn.classList.remove("hidden");
-      }
-      if (copyLinkBtn) copyLinkBtn.classList.remove("hidden");
-
-      if (roomState.isHost) {
-        if (closeBtn) closeBtn.classList.remove("hidden");
-        if (leaveBtn) leaveBtn.classList.add("hidden");
-        if (btnModalClose) btnModalClose.classList.remove("hidden");
-        if (btnModalLeave) btnModalLeave.classList.add("hidden");
-      } else {
-        if (closeBtn) closeBtn.classList.add("hidden");
-        if (leaveBtn) leaveBtn.classList.remove("hidden");
-        if (btnModalClose) btnModalClose.classList.add("hidden");
-        if (btnModalLeave) btnModalLeave.classList.remove("hidden");
-      }
-
-      if (modalActiveBox) modalActiveBox.classList.remove("hidden");
-      if (modalCodeBadge) modalCodeBadge.textContent = roomState.roomCode;
-      if (modalPeerStatus) modalPeerStatus.innerHTML = `⏳ <strong>Arkadaşının odaya bağlanması bekleniyor...</strong> Kodu veya linki gönder.`;
-      if (modalRoleBadge) modalRoleBadge.textContent = roomState.isHost ? "👑 Oda Kurucusu (Host)" : "👤 Katılımcı";
-      if (modalPartList) {
-        modalPartList.innerHTML = `
-          <div class="room-participant-row"><span>👑 <strong>${escapeHtml(roomState.myUserName)}</strong> (Sen)</span><span class="room-chip host">Hazır</span></div>
-          <div class="room-participant-row" style="opacity:0.65;"><span>👤 Katılımcı</span><span class="room-chip waiting">Bekleniyor...</span></div>
-        `;
-      }
-    } else {
-      // 3. KAPALI / BİREYSEL MOD
+    if (!roomState.roomCode) {
+      // KAPALI / BİREYSEL MOD
       if (dot) dot.className = "room-status-dot offline";
       if (text) text.textContent = "Tek Başına Çalışma Modu";
       if (partBar) partBar.classList.add("hidden");
       if (openBtn) {
-        openBtn.textContent = "👥 Ortak Odaya Bağlan";
+        openBtn.textContent = "Ortak Odaya Bağlan";
         openBtn.classList.remove("hidden");
       }
       if (copyLinkBtn) copyLinkBtn.classList.add("hidden");
       if (closeBtn) closeBtn.classList.add("hidden");
       if (leaveBtn) leaveBtn.classList.add("hidden");
-
       if (modalActiveBox) modalActiveBox.classList.add("hidden");
       if (btnModalClose) btnModalClose.classList.add("hidden");
       if (btnModalLeave) btnModalLeave.classList.add("hidden");
+      renderRoomTogether();
+      return;
+    }
+
+    const code = escapeHtml(roomState.roomCode);
+    const me = getRoomClientId();
+    const list = getDisplayParticipants();
+    const connectedCount = list.filter((p) => p.status === "connected").length;
+    const reconnectingOthers = list.some((p) => p.id !== me && p.status === "reconnecting");
+    const peer = roomState.peer;
+    const signalingDown = !!(peer && !peer.destroyed && peer.disconnected);
+    const guestLinked = !roomState.isHost && roomState.status === "connected";
+    const hostHasGuests = roomState.isHost && roomState.guests.size > 0;
+    const isLive = guestLinked || hostHasGuests;
+
+    // Banner durumu
+    let dotClass = "waiting";
+    let bannerHtml;
+    if (roomState.isHost) {
+      if (roomState.status === "opening") bannerHtml = `<strong>Oda açılıyor…</strong> (${code})`;
+      else if (hostHasGuests) { dotClass = "online"; bannerHtml = `<strong>Ortak Oda:</strong> ${connectedCount} kişi eşzamanlı (${code})`; }
+      else bannerHtml = `<strong>Oda Açık:</strong> Arkadaşların bekleniyor (${code})`;
+    } else if (roomState.status === "connecting") {
+      bannerHtml = `<strong>Odaya bağlanılıyor…</strong> (${code})`;
+    } else if (roomState.status === "reconnecting") {
+      bannerHtml = `<strong>Yeniden bağlanılıyor…</strong> (${code})`;
+    } else {
+      dotClass = "online";
+      bannerHtml = `<strong>Ortak Oda:</strong> ${connectedCount} kişi eşzamanlı (${code})`;
+    }
+    if (dot) dot.className = `room-status-dot ${dotClass}`;
+    if (text) text.innerHTML = bannerHtml;
+
+    const statusLabel = (p) => {
+      if (p.status === "connected") return { cls: p.isHost ? "host" : "peer", label: "Bağlı" };
+      if (p.status === "reconnecting") {
+        return { cls: "waiting", label: roomState.status === "connecting" && p.id === me ? "Bağlanıyor…" : "Yeniden bağlanıyor…" };
+      }
+      return { cls: "waiting", label: "Bekleniyor…" };
+    };
+
+    if (partBar) {
+      partBar.classList.remove("hidden");
+      let chips = list.map((p) => {
+        const you = p.id === me ? " (Sen)" : "";
+        const name = escapeHtml(p.name);
+        if (p.isHost) return `<span class="room-chip host" title="Oda kurucusu">${icon("star", 12)} ${name}${you}</span>`;
+        if (p.status === "connected") return `<span class="room-chip peer"><span class="room-presence online" aria-hidden="true"></span>${name}${you}</span>`;
+        return `<span class="room-chip waiting" title="${escapeHtml(statusLabel(p).label)}"><span class="room-presence away" aria-hidden="true"></span>${name}${you}</span>`;
+      }).join("");
+      if (roomState.isHost && !hostHasGuests) chips += `<span class="room-chip waiting">Katılım Bekleniyor...</span>`;
+      partBar.innerHTML = chips;
+    }
+    if (openBtn) {
+      openBtn.textContent = "Oda & Katılımcılar";
+      openBtn.classList.remove("hidden");
+    }
+    if (copyLinkBtn) copyLinkBtn.classList.remove("hidden");
+
+    if (closeBtn) closeBtn.classList.toggle("hidden", !roomState.isHost);
+    if (btnModalClose) btnModalClose.classList.toggle("hidden", !roomState.isHost);
+    if (leaveBtn) leaveBtn.classList.toggle("hidden", roomState.isHost);
+    if (btnModalLeave) btnModalLeave.classList.toggle("hidden", roomState.isHost);
+
+    if (modalActiveBox) modalActiveBox.classList.remove("hidden");
+    if (modalCodeBadge) modalCodeBadge.textContent = roomState.roomCode;
+    if (modalRoleBadge) modalRoleBadge.textContent = roomState.isHost ? "Oda Kurucusu (Host)" : "Katılımcı";
+
+    if (modalPeerStatus) {
+      let html;
+      if (roomState.isHost && roomState.status === "opening") {
+        html = roomState.reclaiming
+          ? `<strong>Oda yeniden açılıyor…</strong> Arkadaşların birazdan otomatik olarak geri bağlanacak.`
+          : `<strong>Oda açılıyor…</strong>`;
+      } else if (roomState.isHost && !hostHasGuests) {
+        html = `<strong>Arkadaşlarının odaya bağlanması bekleniyor...</strong> Kodu veya linki gönder. (En fazla ${ROOM_MAX_GUESTS} kişi katılabilir.)`;
+      } else if (!roomState.isHost && roomState.status === "connecting") {
+        html = `<strong>Odaya bağlanılıyor…</strong>`;
+      } else if (!roomState.isHost && roomState.status === "reconnecting") {
+        html = `<strong>Yeniden bağlanılıyor…</strong> Bağlantı koptu, otomatik olarak tekrar deneniyor. Odadan çıkarılmadın.`;
+      } else {
+        html = `<strong>Bağlantı kuruldu!</strong> Sayaç hareketleri odadaki herkesin ekranında anlık senkronize.`;
+        if (reconnectingOthers) html += ` <br>Bazı arkadaşların yeniden bağlanıyor…`;
+      }
+      if (roomState.isHost && signalingDown && roomState.status !== "opening") {
+        html += ` <br>Sunucu bağlantısı yenileniyor… Bağlı olanlar etkilenmez.`;
+      }
+      modalPeerStatus.innerHTML = html;
+    }
+
+    if (modalPartList) {
+      let rows = list.map((p) => {
+        const st = statusLabel(p);
+        const you = p.id === me ? " (Sen)" : "";
+        const icon = p.isHost ? `<span class="room-presence host" title="Oda kurucusu"></span>` : p.status === "connected" ? `<span class="room-presence online" title="Bağlı"></span>` : `<span class="room-presence away" title="Yeniden bağlanıyor"></span>`;
+        const hostTag = p.isHost ? " · Host" : "";
+        const cls = p.status === "connected" ? "" : " is-reconnecting";
+        const work = p.work
+          ? `<span class="room-participant-work">${p.work.done ? "✓ " : ""}${escapeHtml(p.work.text)}</span>`
+          : "";
+        return `<div class="room-participant-row${cls}"><span>${icon} <strong>${escapeHtml(p.name)}</strong>${you}${hostTag}${work}</span><span class="room-chip ${st.cls}">${st.label}</span></div>`;
+      }).join("");
+      if (roomState.isHost && !hostHasGuests) {
+        rows += `<div class="room-participant-row" style="opacity:0.65;"><span>Katılımcı</span><span class="room-chip waiting">Bekleniyor...</span></div>`;
+      }
+      modalPartList.innerHTML = rows;
+    }
+
+    roomState.isWaiting = !isLive;
+    renderRoomTogether();
+  }
+
+  // ---------- Zamanlayıcı ekranındaki oda parçaları ----------
+  // "Şu an ne çalışıyoruz" listesi, ortak seri kutusu ve mola sohbeti.
+  function renderRoomTogether() {
+    const inRoom = !!roomState.roomCode;
+    const box = document.getElementById("roomTogetherBox");
+    const chatPanel = document.getElementById("roomChatPanel");
+    if (box) box.classList.toggle("hidden", !inRoom);
+    if (chatPanel) chatPanel.classList.toggle("hidden", !inRoom);
+    renderRoomStreakStat();
+
+    if (!inRoom) {
+      renderRoomChatUnread();
+      return;
+    }
+
+    const listEl = document.getElementById("roomWorkList");
+    if (listEl) {
+      const me = getRoomClientId();
+      const list = getDisplayParticipants().map((p) => (p.id === me ? Object.assign({}, p, { work: roomState.myWork }) : p));
+      listEl.innerHTML = list.map((p) => {
+        const you = p.id === me ? " (Sen)" : "";
+        const icon = p.isHost ? `<span class="room-presence host" title="Oda kurucusu"></span>` : p.status === "connected" ? `<span class="room-presence online" title="Bağlı"></span>` : `<span class="room-presence away" title="Yeniden bağlanıyor"></span>`;
+        const away = p.status === "connected" ? "" : " is-away";
+        const done = p.work && p.work.done ? " is-done" : "";
+        const text = p.work
+          ? `${p.work.done ? `<span class="room-work-check" title="Bitti">✓</span> ` : ""}<span class="room-work-text">${escapeHtml(p.work.text)}</span>`
+          : `<span class="room-work-text is-empty">${p.id === me ? "Henüz paylaşmadın" : "Henüz paylaşmadı"}</span>`;
+        return `<div class="room-work-row${away}${done}"><span class="room-work-name">${icon} ${escapeHtml(p.name)}${you}:</span>${text}</div>`;
+      }).join("");
+    }
+
+    const input = document.getElementById("inputRoomWork");
+    if (input && document.activeElement !== input && !input.value && roomState.myWork) {
+      input.value = roomState.myWork.text;
+    }
+    const doneBtn = document.getElementById("btnRoomWorkDone");
+    const clearBtn = document.getElementById("btnRoomWorkClear");
+    if (doneBtn) {
+      doneBtn.classList.toggle("hidden", !roomState.myWork);
+      doneBtn.textContent = roomState.myWork && roomState.myWork.done ? "↺ Devam" : "✓ Bitti";
+      doneBtn.title = roomState.myWork && roomState.myWork.done ? "Tekrar çalışıyorum olarak işaretle" : "Bitti olarak işaretle";
+    }
+    if (clearBtn) clearBtn.classList.toggle("hidden", !roomState.myWork);
+
+    // Bugünün görevlerinden seçim önerileri
+    const dl = document.getElementById("roomWorkTaskOptions");
+    if (dl) {
+      const today = getTodayISO();
+      const weekMon = getWeekMondayISO(today);
+      const titles = [];
+      (state.tasks || []).forEach((t) => {
+        if (t.completed || !t.title) return;
+        if ((t.scope === "day" && t.date === today) || (t.scope === "week" && t.weekMonday === weekMon)) {
+          const title = String(t.title).slice(0, ROOM_WORK_MAX_LEN);
+          if (!titles.includes(title)) titles.push(title);
+        }
+      });
+      dl.innerHTML = titles.slice(0, 20).map((t) => `<option value="${escapeHtml(t)}"></option>`).join("");
+    }
+
+    updateRoomChatLock(true);
+    renderRoomChatUnread();
+  }
+
+  function renderRoomStreakStat() {
+    const box = document.getElementById("roomStreakStat");
+    const val = document.getElementById("statRoomStreak");
+    if (!box || !val) return;
+    const rs = getLiveRoomStreak();
+    const show = !!roomState.roomCode || rs.best > 0;
+    box.classList.toggle("hidden", !show);
+    if (!show) return;
+    val.textContent = rs.best > rs.current ? `${rs.current} gün · en iyi ${rs.best}` : `${rs.current} gün`;
+    decorateFigures(box);
+    box.title = rs.today
+      ? "Bugünün ortak oturumu tamam! Başka biriyle aynı odada ders oturumu tamamladığın art arda günler."
+      : "Başka biriyle aynı odada en az bir ders oturumu tamamladığın art arda günler. Bugün bir ortak oturum seriyi sürdürür.";
+  }
+
+  function formatChatTime(ts) {
+    const d = new Date(ts);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+
+  function renderRoomChat() {
+    const listEl = document.getElementById("roomChatList");
+    if (!listEl) return;
+    const nearBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 40;
+    const me = getRoomClientId();
+    if (roomState.chat.length === 0) {
+      listEl.innerHTML = `<div class="room-chat-empty">Henüz mesaj yok. Molada bir selam ver! 👋</div>`;
+    } else {
+      listEl.innerHTML = roomState.chat.map((m) => {
+        const mine = m.from === me;
+        return `<div class="room-chat-msg${mine ? " is-mine" : ""}"><div class="room-chat-meta"><strong>${escapeHtml(mine ? "Sen" : m.name)}</strong><span>${formatChatTime(m.ts)}</span></div>${escapeHtml(m.text)}</div>`;
+      }).join("");
+    }
+    if (nearBottom || roomState.chat.length <= 1) listEl.scrollTop = listEl.scrollHeight;
+    maybeClearRoomChatUnread();
+    renderRoomChatUnread();
+  }
+
+  function isRoomChatInView() {
+    if (uiState.currentView !== "timer" || document.visibilityState !== "visible") return false;
+    const panel = document.getElementById("roomChatPanel");
+    if (!panel || panel.classList.contains("hidden")) return false;
+    const r = panel.getBoundingClientRect();
+    return r.bottom > 0 && r.top < window.innerHeight;
+  }
+
+  function maybeClearRoomChatUnread() {
+    if (roomState.chatUnread > 0 && isRoomChatInView()) {
+      roomState.chatUnread = 0;
+      renderRoomChatUnread();
     }
   }
 
+  function renderRoomChatUnread() {
+    const n = roomState.roomCode ? roomState.chatUnread : 0;
+    const badge = document.getElementById("roomChatUnreadBadge");
+    if (badge) {
+      badge.classList.toggle("hidden", n === 0);
+      badge.textContent = String(n);
+    }
+    const floating = document.getElementById("floatingChatUnread");
+    if (floating) {
+      floating.classList.toggle("hidden", n === 0);
+      floating.textContent = `💬 ${n}`;
+    }
+  }
+
+  let lastRoomChatLocked = null;
+  function updateRoomChatLock(force = false) {
+    if (!roomState.roomCode) return;
+    const locked = isRoomChatLocked();
+    if (!force && locked === lastRoomChatLocked) return;
+    lastRoomChatLocked = locked;
+    const note = document.getElementById("roomChatLockNote");
+    const form = document.getElementById("roomChatForm");
+    const input = document.getElementById("inputRoomChat");
+    const btn = document.getElementById("btnRoomChatSend");
+    if (note) note.classList.toggle("hidden", !locked);
+    if (form) form.classList.toggle("is-locked", locked);
+    if (input) {
+      input.disabled = locked;
+      input.placeholder = locked ? "Ders bitince yazabilirsin…" : "Molada bir şey yaz…";
+    }
+    if (btn) btn.disabled = locked;
+  }
 
   function bindEvents() {
     // Sayfa & Veri Yenile Butonu (Zamanlayıcıyı koruyarak)
@@ -3940,6 +5623,28 @@
     document.querySelectorAll("[data-open-view]").forEach((btn) => {
       btn.addEventListener("click", () => switchView(btn.dataset.openView));
     });
+
+    // Dar ekran menü düğmesi (yalnızca görünüm: hızlı eylemler + ayarlar panelini aç/kapat)
+    const btnMobileMenu = document.getElementById("btnMobileMenu");
+    const sidebarEl = document.querySelector(".sidebar");
+    if (btnMobileMenu && sidebarEl) {
+      const setMobileMenu = (open) => {
+        sidebarEl.classList.toggle("is-menu-open", open);
+        btnMobileMenu.setAttribute("aria-expanded", String(open));
+      };
+      btnMobileMenu.addEventListener("click", () => setMobileMenu(!sidebarEl.classList.contains("is-menu-open")));
+      sidebarEl.addEventListener("click", (e) => {
+        if (e.target.closest(".nav-item, .sidebar-quick-actions .btn")) setMobileMenu(false);
+      });
+    }
+    // Dar ekranda yatay menü şeridinde aktif sayfa görünür kalsın
+    const keepActiveNavVisible = () => {
+      const nav = document.querySelector(".nav-menu");
+      const act = nav && nav.querySelector(".nav-item.active");
+      if (nav && act && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, act.offsetLeft - 12);
+    };
+    document.querySelectorAll(".nav-item").forEach((btn) => btn.addEventListener("click", keepActiveNavVisible));
+    setTimeout(keepActiveNavVisible, 0);
 
     // Hızlı Görev & Hedef Butonları
     document.getElementById("btnQuickTask").addEventListener("click", () => openTaskModal());
@@ -4460,7 +6165,8 @@
           note,
           status: "active",
           completions: {},
-          bestStreak: 0
+          bestStreak: 0,
+          createdAt: getTodayISO()
         });
         showToast("🔁 Yeni tekrarlayan görev eklendi.");
       }
@@ -4517,7 +6223,7 @@
         if (shell) {
           shell.classList.toggle("focus-only-page", uiState.focusOnlyPage);
         }
-        btnFocusPage.textContent = uiState.focusOnlyPage ? "🔙 Menüyü Göster" : "🔲 Sadece Bu Sayfa";
+        btnFocusPage.textContent = uiState.focusOnlyPage ? "Menüyü Göster" : "Sadece Bu Sayfa";
         showToast(
           uiState.focusOnlyPage
             ? "🔲 Tek sayfa odak görünümü açıldı. Sol menü gizlendi."
@@ -4701,6 +6407,60 @@
       });
     }
 
+    // "Şu an ne çalışıyorum" formu
+    const roomWorkForm = document.getElementById("roomWorkForm");
+    if (roomWorkForm) {
+      roomWorkForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const inp = document.getElementById("inputRoomWork");
+        const text = inp ? inp.value : "";
+        if (!sanitizeWork({ text })) {
+          showToast("✏️ Önce ne çalıştığını kısaca yaz.");
+          return;
+        }
+        setMyWork({ text, done: false });
+        if (inp) inp.blur();
+        showToast("📝 Durumun odadakilerle paylaşıldı.");
+      });
+    }
+    const btnRoomWorkDone = document.getElementById("btnRoomWorkDone");
+    if (btnRoomWorkDone) {
+      btnRoomWorkDone.addEventListener("click", () => {
+        if (!roomState.myWork) return;
+        setMyWork({ text: roomState.myWork.text, done: !roomState.myWork.done });
+      });
+    }
+    const btnRoomWorkClear = document.getElementById("btnRoomWorkClear");
+    if (btnRoomWorkClear) {
+      btnRoomWorkClear.addEventListener("click", () => {
+        setMyWork(null);
+        const inp = document.getElementById("inputRoomWork");
+        if (inp) inp.value = "";
+      });
+    }
+
+    // Mola sohbeti
+    const roomChatForm = document.getElementById("roomChatForm");
+    if (roomChatForm) {
+      roomChatForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const inp = document.getElementById("inputRoomChat");
+        if (!inp || !inp.value.trim()) return;
+        sendRoomChat(inp.value);
+        if (!isRoomChatLocked()) inp.value = "";
+      });
+    }
+    const inputRoomChat = document.getElementById("inputRoomChat");
+    if (inputRoomChat) {
+      inputRoomChat.addEventListener("focus", () => {
+        roomState.chatUnread = 0;
+        renderRoomChatUnread();
+      });
+    }
+    window.addEventListener("scroll", () => maybeClearRoomChatUnread(), { passive: true });
+    document.addEventListener("visibilitychange", () => maybeClearRoomChatUnread());
+    renderRoomChat();
+
     const btnCopyRoomCode = document.getElementById("btnCopyRoomCode");
     if (btnCopyRoomCode) {
       btnCopyRoomCode.addEventListener("click", () => {
@@ -4766,43 +6526,6 @@
         const v = Math.max(1, Math.min(90, Number(cfgLong.value) || 15));
         uiState.timer.longBreakMins = v;
         if (uiState.timer.mode === "long_break" && !uiState.timer.running) switchTimerMode("long_break", v);
-      });
-    }
-
-    // Spotify Hazır İstasyonlar ve Özel Link
-    document.querySelectorAll("[data-spotify-uri]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        document.querySelectorAll("[data-spotify-uri]").forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        const uri = btn.dataset.spotifyUri;
-        const iframe = document.getElementById("spotifyEmbedFrame");
-        if (iframe && uri) {
-          iframe.src = `https://open.spotify.com/embed/${uri}?utm_source=generator&theme=0`;
-          showToast("🎵 Spotify istasyonu değiştirildi.");
-        }
-      });
-    });
-
-    const formCustomSpotify = document.getElementById("formCustomSpotify");
-    if (formCustomSpotify) {
-      formCustomSpotify.addEventListener("submit", (e) => {
-        e.preventDefault();
-        const inp = document.getElementById("inputCustomSpotifyUrl");
-        const raw = (inp && inp.value.trim()) || "";
-        if (!raw) return;
-
-        // open.spotify.com/(intl-tr/)?(playlist|track|album|episode|show)/ID yakala
-        const match = raw.match(/spotify\.com\/(?:intl-[a-z]+\/)?(playlist|track|album|episode|show)\/([a-zA-Z0-9]+)/);
-        const iframe = document.getElementById("spotifyEmbedFrame");
-        if (match && iframe) {
-          const type = match[1];
-          const spId = match[2];
-          iframe.src = `https://open.spotify.com/embed/${type}/${spId}?utm_source=generator&theme=0`;
-          inp.value = "";
-          showToast("🎵 Özel Spotify bağlantısı yüklendi!");
-        } else {
-          showToast("⚠️ Geçerli bir Spotify (playlist, track veya album) linki girin.");
-        }
       });
     }
 
@@ -4899,19 +6622,64 @@
         const dateVal =
           (inputNotesPageDate && inputNotesPageDate.value) || uiState.notesPageDateISO || getTodayISO();
         const area = document.getElementById("textareaNotesPageContent");
-        const text = (area && area.value.trim()) || "";
-        state.dailyNotes = state.dailyNotes || {};
-        state.dailyNotes[dateVal] = text;
-        uiState.notesPageDateISO = dateVal;
-        saveData();
-        renderAll();
-        showToast(`📓 ${formatFullTR(dateVal)} gününün notu kaydedildi!`);
+        const selectNoteType = document.getElementById("selectNoteType");
+        const typeVal = (selectNoteType && selectNoteType.value) || "daily";
+        let text = (area && area.value.trim()) || "";
+        if (!text) return;
+
+        state.reports = Array.isArray(state.reports) ? state.reports : [];
+
+        if (typeVal === "report_user" || typeVal === "report_ai") {
+          const isAi = typeVal === "report_ai" || text.toLowerCase().includes("#ai");
+          if (isAi && !text.includes("#ai")) {
+            text = `${text} #ai`;
+          }
+          const firstLine = text.split("\n")[0].replace(/#\w+/g, "").trim().slice(0, 50);
+          const reportTitle = firstLine ? firstLine : (isAi ? "🤖 AI Raporu" : "📊 Şahsi Rapor");
+          state.reports.unshift({
+            id: `rep_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            title: reportTitle,
+            date: dateVal,
+            author: isAi ? "ai" : "user",
+            content: text,
+            tags: isAi ? ["#ai"] : [],
+            createdAt: new Date().toISOString()
+          });
+          uiState.notesPageDateISO = dateVal;
+          if (area) area.value = "";
+          saveData();
+          renderAll();
+          showToast(`📊 ${isAi ? "🤖 Yapay Zeka" : "👤 Şahsi"} raporu kaydedildi!`);
+        } else {
+          state.dailyNotes = state.dailyNotes || {};
+          state.dailyNotes[dateVal] = text;
+          uiState.notesPageDateISO = dateVal;
+          saveData();
+          renderAll();
+          showToast(`📓 ${formatFullTR(dateVal)} gününün şahsi notu kaydedildi!`);
+        }
       });
     }
 
     document.querySelectorAll("[data-compiled-note-filter]").forEach((btn) => {
       btn.addEventListener("click", () => {
         uiState.compiledNoteFilter = btn.dataset.compiledNoteFilter;
+        // Raporlar sekmesi seçildiyse türü şahsi rapora çek, günlük not seçildiyse günlük nota çek
+        const selectNoteType = document.getElementById("selectNoteType");
+        if (selectNoteType) {
+          if (uiState.compiledNoteFilter === "reports") {
+            selectNoteType.value = "report_user";
+          } else if (uiState.compiledNoteFilter === "daily") {
+            selectNoteType.value = "daily";
+          }
+        }
+        renderNotesView();
+      });
+    });
+
+    document.querySelectorAll("[data-note-subfilter]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        uiState.noteSubFilter = btn.dataset.noteSubfilter;
         renderNotesView();
       });
     });
@@ -5220,6 +6988,36 @@
             renderAll();
             showToast("🗑️ Haftalık not silindi.");
           }
+        } else if (action === "edit-report") {
+          const repId = actionBtn.dataset.id;
+          const rep = (state.reports || []).find((r) => r.id === repId);
+          if (rep) {
+            const newTitle = prompt("Rapor Başlığı:", rep.title || "Çalışma Raporu");
+            if (newTitle === null) return;
+            const newContent = prompt(
+              "Rapor İçeriği (Yapay zeka için metne #ai ekleyebilirsiniz):",
+              rep.content || ""
+            );
+            if (newContent === null) return;
+            rep.title = newTitle.trim();
+            rep.content = newContent.trim();
+            const isAi = rep.content.includes("#ai");
+            rep.author = isAi ? "ai" : (rep.author || "user");
+            rep.tags = isAi ? ["#ai"] : [];
+            saveData();
+            renderAll();
+            showToast("✅ Rapor güncellendi.");
+          }
+        } else if (action === "delete-report") {
+          const repId = actionBtn.dataset.id;
+          if (repId && state.reports) {
+            if (confirm("Bu raporu silmek istediğine emin misin?")) {
+              state.reports = state.reports.filter((r) => r.id !== repId);
+              saveData();
+              renderAll();
+              showToast("🗑️ Rapor silindi.");
+            }
+          }
         }
         return;
       }
@@ -5298,5 +7096,7 @@
     await loadData();
     restoreTimerState();
     startRealTimeLoop();
+    // Sayfa yenilendiyse (host ya da misafir) odaya otomatik geri dön
+    resumeRoomSession();
   });
 })();
