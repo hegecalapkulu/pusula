@@ -1081,10 +1081,38 @@ html[data-style="modern"] .m-stats-row {
 html[data-style="modern"] .m-stat {
   position: relative;
   overflow: hidden;
-  min-height: 156px;
-  padding: 15px 16px 14px;
+  padding: 15px 16px 15px;
   display: flex;
   flex-direction: column;
+  gap: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+html[data-style="modern"] .m-stat:hover {
+  border-color: rgba(var(--accent-rgb), 0.4);
+}
+html[data-style="modern"] .m-stat:hover .m-round-btn {
+  color: var(--text-primary);
+  border-color: rgba(var(--accent-rgb), 0.5);
+}
+html[data-style="modern"] .m-stat:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+/* Sayılar kartın altına yaslanır: grafik yerine boşluk kalmaz */
+html[data-style="modern"] .m-stat-figs {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+html[data-style="modern"] .m-stat-foot {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--m-line);
+  width: 100%;
+  font-size: 12.5px;
+  color: var(--text-secondary);
 }
 html[data-style="modern"] .m-stat-top {
   display: flex;
@@ -1128,7 +1156,7 @@ html[data-style="modern"] .m-round-btn svg {
   height: 14px;
 }
 html[data-style="modern"] .m-stat-k {
-  margin-top: 12px;
+  margin-top: 0;
 }
 html[data-style="modern"] .m-big {
   font-size: 38px;
@@ -1182,49 +1210,6 @@ html[data-style="modern"] .m-delta.down { color: var(--m-coral); }
 html[data-style="modern"] .m-delta.down i { background: rgba(var(--m-coral-rgb), 0.16); }
 html[data-style="modern"] .m-delta.flat { color: var(--accent-text); }
 html[data-style="modern"] .m-delta.flat i { background: rgba(var(--accent-rgb), 0.14); }
-html[data-style="modern"] .m-spark {
-  position: absolute;
-  left: 46%;
-  right: 0;
-  bottom: 40px;
-  height: 46px;
-  pointer-events: none;
-}
-html[data-style="modern"] .m-spark svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-html[data-style="modern"] .m-spark .m-spark-line {
-  fill: none;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
-}
-html[data-style="modern"] .m-spark .m-spark-base {
-  stroke-width: 1;
-  stroke-dasharray: 3 4;
-  vector-effect: non-scaling-stroke;
-  opacity: 0.35;
-}
-html[data-style="modern"] .m-spark-tip {
-  position: absolute;
-  right: 12px;
-  top: 0;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 7px;
-  background: var(--m-chip);
-  border: 1px solid var(--m-line-strong);
-  color: var(--text-primary);
-  white-space: nowrap;
-}
-html[data-style="modern"] .m-glow-accent { color: var(--m-fill); filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), calc(0.75 * var(--m-glow)))); }
-html[data-style="modern"] .m-glow-green { color: var(--m-green); filter: drop-shadow(0 0 6px rgba(var(--m-green-rgb), calc(0.7 * var(--m-glow)))); }
-html[data-style="modern"] .m-glow-coral { color: var(--m-coral); filter: drop-shadow(0 0 6px rgba(var(--m-coral-rgb), calc(0.7 * var(--m-glow)))); }
 
 /* Promo kartı (Günün Sözü; zamanlayıcıdaki ortak oda bandı aynı dili kullanır) */
 html[data-style="modern"] .quote-banner-card,
@@ -2522,20 +2507,8 @@ html[data-style="modern"] .task-checkbox:focus-visible {
     gap: 10px;
   }
   html[data-style="modern"] .m-stat {
-    min-height: 0;
     padding: 14px 16px 14px;
-  }
-  html[data-style="modern"] .m-stat .m-spark {
-    left: auto;
-    width: 46%;
-    height: 56px;
-    bottom: 12px;
-  }
-  html[data-style="modern"] .m-stat .m-spark-tip {
-    display: none;
-  }
-  html[data-style="modern"] .m-stat-k {
-    margin-top: 10px;
+    gap: 12px;
   }
   html[data-style="modern"] .m-big {
     font-size: 32px;
@@ -2685,4 +2658,64 @@ html[data-style="modern"] #inputRoomCode {
 html[data-style="modern"] .room-action-card .btn {
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+/* ---------- Sayfa grafikleri ve "kendi sayfasında aç" bağlantıları ---------- */
+html[data-style="modern"] .day-chart {
+  --chart-bar: var(--m-fill);
+  --chart-track: rgba(var(--accent-rgb), 0.12);
+  --chart-today: var(--accent-text);
+}
+html[data-style="modern"] .day-chart.tone-warn {
+  --chart-bar: var(--m-coral);
+  --chart-track: rgba(var(--m-coral-rgb), 0.12);
+  --chart-today: var(--m-coral);
+}
+html[data-style="modern"] .day-chart-bar {
+  filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), calc(0.35 * var(--m-glow))));
+}
+html[data-style="modern"] .day-chart.tone-warn .day-chart-bar {
+  filter: drop-shadow(0 0 6px rgba(var(--m-coral-rgb), calc(0.35 * var(--m-glow))));
+}
+html[data-style="modern"] .day-chart-base {
+  stroke: var(--m-line-strong);
+}
+html[data-style="modern"] .day-chart-col:hover .day-chart-hit {
+  fill: var(--m-highlight);
+}
+html[data-style="modern"] .day-chart-empty {
+  border-color: var(--m-line-strong);
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--m-inner-top), var(--m-inner-bot));
+}
+html[data-style="modern"] .day-chart-total {
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: var(--m-radius-pill);
+  background: var(--m-chip);
+  color: var(--text-secondary);
+}
+html[data-style="modern"] .day-chart-total:empty {
+  display: none;
+}
+html[data-style="modern"] .day-chart-card {
+  margin-top: 16px;
+}
+html[data-style="modern"] .day-chart-block {
+  max-width: 560px;
+  border-top-color: var(--m-line);
+}
+html[data-style="modern"] .nav-card.is-navlink:hover,
+html[data-style="modern"] .mini-stat.is-navlink:hover {
+  border-color: rgba(var(--accent-rgb), 0.45) !important;
+  background-color: transparent;
+  filter: brightness(1.06);
+}
+html[data-style="modern"][data-theme="light"] .nav-card.is-navlink:hover,
+html[data-style="modern"][data-theme="light"] .mini-stat.is-navlink:hover {
+  filter: brightness(0.985);
+}
+html[data-style="modern"] .nav-row.is-navlink:hover {
+  background-color: var(--m-highlight) !important;
 }

@@ -573,7 +573,9 @@
   }
 
   let saveTimeout = null;
+  let isDirty = false;
   async function saveData(immediate = false) {
+    isDirty = true;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (e) {
@@ -589,6 +591,7 @@
           body: payload
         });
         if (resp.ok) {
+          isDirty = false;
           setSyncIndicator(true, "Veriler Diskte Güvende");
         } else {
           setSyncIndicator(true, "Tarayıcı Hafızasında Kayıtlı");
@@ -607,16 +610,23 @@
     }
   }
 
-  // Sayfa kapanırken veya yenilenirken verinin diske kaydedilmesini garanti et
+  // Sayfa kapanırken veya yenilenirken verinin diske kaydedilmesini garanti et (yalnızca kaydedilmemiş değişiklik varsa)
   window.addEventListener("beforeunload", () => {
     try {
       saveTimerState();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      if (navigator.sendBeacon) {
+      if (isDirty && navigator.sendBeacon) {
         const blob = new Blob([JSON.stringify(state)], { type: "application/json" });
         navigator.sendBeacon("/api/data", blob);
       }
     } catch (_) {}
+  });
+
+  // Sekmeye geri dönüldüğünde diskteki güncellemeleri otomatik algıla
+  window.addEventListener("focus", async () => {
+    if (!isDirty) {
+      await loadData();
+    }
   });
 
   function setSyncIndicator(ok, text) {
@@ -899,31 +909,193 @@
     return `<svg class="ic" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${p}</svg>`;
   }
 
-  // Son günlerin değerlerinden ince, parlayan bir çizgi grafik (SVG)
-  function buildSparkSvg(values, glowClass) {
-    const w = 100;
-    const h = 40;
-    const max = Math.max(1, ...values);
-    const n = values.length;
-    const pts = values.map((v, i) => {
-      const x = n > 1 ? (i / (n - 1)) * w : w;
-      const y = h - 6 - (v / max) * (h - 14);
-      return [x, y];
+  // ---------- Günlük seriler ----------
+  // Günün Odağı kartları ve sayfa grafikleri (Haftalık Plan, Zamanlayıcı,
+  // Erteleme Analizi) aynı hesapları kullanır. Yalnızca uygulamanın zaten
+  // kaydettiği verilerden okunur; tahmin/uydurma değer yoktur.
+  function lastNDaysISO(endISO, n = 7) {
+    const out = [];
+    for (let i = n - 1; i >= 0; i--) out.push(addDaysISO(endISO, -i));
+    return out;
+  }
+
+  // Güne atanmış görevler: tamamlanan (value) / planlanan (total)
+  function getTaskDoneSeries(endISO, n = 7) {
+    return lastNDaysISO(endISO, n).map((iso) => {
+      const list = state.tasks.filter((t) => t.scope === "day" && t.date === iso);
+      return { iso, value: list.filter((t) => t.completed).length, total: list.length };
     });
-    // Yumuşak eğri (kübik, yatay kontrol noktaları)
-    let d = `M${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)}`;
-    for (let i = 1; i < pts.length; i++) {
-      const [x0, y0] = pts[i - 1];
-      const [x1, y1] = pts[i];
-      const cx = (x0 + x1) / 2;
-      d += ` C${cx.toFixed(2)} ${y0.toFixed(2)}, ${cx.toFixed(2)} ${y1.toFixed(2)}, ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+  }
+
+  // Zamanlayıcı kayıtları (focusStats): günlük odak dakikası ve oturum sayısı
+  function getFocusSeries(endISO, n = 7) {
+    const stats = state.focusStats || {};
+    return lastNDaysISO(endISO, n).map((iso) => {
+      const st = stats[iso];
+      return {
+        iso,
+        value: (st && Number(st.minutes)) || 0,
+        sessions: (st && Number(st.sessions)) || 0
+      };
+    });
+  }
+
+  // Erteleme kayıtları (postponeHistory[].at): o gün yapılan erteleme sayısı
+  function getPostponeSeries(endISO, n = 7) {
+    const countOn = {};
+    state.tasks.forEach((t) => {
+      (t.postponeHistory || []).forEach((h) => {
+        if (h && h.at) countOn[h.at] = (countOn[h.at] || 0) + 1;
+      });
+    });
+    return lastNDaysISO(endISO, n).map((iso) => ({ iso, value: countOn[iso] || 0 }));
+  }
+
+  function sumSeries(series, key = "value") {
+    return series.reduce((a, p) => a + (Number(p[key]) || 0), 0);
+  }
+
+  // ---------- Sayfa grafikleri: gün etiketli sütun grafik (satır içi SVG) ----------
+  // points: [{ iso, value, total?, tip? }]. Her sütunun değeri üstünde yazılıdır;
+  // ayrıntı fareyle üzerine gelince (SVG <title>) görünür; ekran okuyucular için
+  // tüm değerler aria-label özetindedir. Renkler tema değişkenlerinden (CSS).
+  function chartDayLabel(iso) {
+    const dt = parseISODate(iso);
+    return {
+      day: TR_DAYS_SHORT[dt.getDay()],
+      date: `${dt.getDate()} ${TR_MONTHS[dt.getMonth()].slice(0, 3)}`
+    };
+  }
+
+  function buildDayBarChart(o) {
+    const points = o.points || [];
+    const fmt = o.format || ((p) => String(p.value || 0));
+    const tone = o.tone || "accent";
+    const caption = `<figcaption class="day-chart-caption">${o.caption}</figcaption>`;
+    const hasData = points.some((p) => (p.value || 0) > 0 || (p.total || 0) > 0);
+    if (!hasData) {
+      return `<figure class="day-chart is-empty tone-${tone}">
+        <div class="day-chart-empty" role="note">${icon("chart", 18)}<span>${o.emptyText}</span></div>
+        ${caption}
+      </figure>`;
     }
-    const last = pts[pts.length - 1];
-    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true" focusable="false">
-      <line class="m-spark-base" x1="0" y1="${h - 6}" x2="${w}" y2="${h - 6}" stroke="currentColor" />
-      <g class="${glowClass}"><path class="m-spark-line" d="${d}" stroke="currentColor" /></g>
-      <circle cx="${last[0].toFixed(2)}" cy="${last[1].toFixed(2)}" r="0.01" stroke="currentColor" stroke-width="7" stroke-linecap="round" vector-effect="non-scaling-stroke" class="${glowClass}" />
-    </svg>`;
+    const today = getTodayISO();
+    const n = points.length;
+    const H = 164; // px
+    const top = 22; // değer etiketi için üst boşluk
+    const base = 116; // sütun tabanı (altında gün ve tarih etiketleri)
+    const area = base - top;
+    const max = Math.max(1, ...points.map((p) => Math.max(p.value || 0, p.total || 0)));
+    const colW = 100 / n;
+    const barW = colW * 0.46;
+    const pct = (v) => `${v.toFixed(3)}%`;
+    const summary = [];
+    const cols = points
+      .map((p, i) => {
+        const lab = chartDayLabel(p.iso);
+        const cx = colW * i + colW / 2;
+        const x = cx - barW / 2;
+        const hVal = ((p.value || 0) / max) * area;
+        const hTot = ((p.total || 0) / max) * area;
+        const valText = fmt(p);
+        const tip = p.tip || `${lab.day} ${lab.date}: ${valText}`;
+        summary.push(`${lab.day} ${lab.date}: ${valText}`);
+        const cls = `day-chart-col${p.iso === today ? " is-today" : ""}${(p.value || 0) === 0 ? " is-zero" : ""}`;
+        return `<g class="${cls}">
+          <title>${escapeHtml(tip)}</title>
+          <rect class="day-chart-hit" x="${pct(colW * i)}" y="0" width="${pct(colW)}" height="${H}" />
+          ${hTot > 0 ? `<rect class="day-chart-track" x="${pct(x)}" y="${(base - hTot).toFixed(1)}" width="${pct(barW)}" height="${hTot.toFixed(1)}" rx="5" />` : ""}
+          ${hVal > 0 ? `<rect class="day-chart-bar" x="${pct(x)}" y="${(base - hVal).toFixed(1)}" width="${pct(barW)}" height="${hVal.toFixed(1)}" rx="5" />` : ""}
+          <text class="day-chart-val" x="${pct(cx)}" y="${(base - Math.max(hVal, hTot) - 7).toFixed(1)}" text-anchor="middle">${escapeHtml(valText)}</text>
+          <text class="day-chart-day" x="${pct(cx)}" y="${base + 20}" text-anchor="middle">${lab.day}</text>
+          <text class="day-chart-date" x="${pct(cx)}" y="${base + 36}" text-anchor="middle">${lab.date}</text>
+        </g>`;
+      })
+      .join("");
+    const aria = `${o.title}. ${summary.join("; ")}.`;
+    return `<figure class="day-chart tone-${tone}">
+      <svg class="day-chart-svg" width="100%" height="${H}" role="img" aria-label="${escapeHtml(aria)}" focusable="false">
+        <line class="day-chart-base" x1="0" y1="${base + 0.5}" x2="100%" y2="${base + 0.5}" />
+        ${cols}
+      </svg>
+      ${caption}
+    </figure>`;
+  }
+
+  // Haftalık Plan: seçili haftanın günlerinde tamamlanan / planlanan görevler
+  function renderWeeklyDoneChart(weekMon) {
+    const host = document.getElementById("weeklyDoneChart");
+    if (!host) return;
+    const points = getTaskDoneSeries(addDaysISO(weekMon, 6), 7).map((p) => {
+      const lab = chartDayLabel(p.iso);
+      return {
+        ...p,
+        tip: p.total > 0
+          ? `${lab.day} ${lab.date}: ${p.value} / ${p.total} görev tamamlandı`
+          : `${lab.day} ${lab.date}: bu güne görev atanmamış`
+      };
+    });
+    const done = sumSeries(points);
+    const planned = sumSeries(points, "total");
+    const totalEl = document.getElementById("weeklyDoneChartTotal");
+    if (totalEl) totalEl.textContent = planned > 0 ? `${done} / ${planned} tamamlandı` : "";
+    host.innerHTML = buildDayBarChart({
+      title: `${formatWeekRangeTR(weekMon)} haftası, günlere göre tamamlanan görevler`,
+      points,
+      format: (p) => (p.total > 0 ? `${p.value}/${p.total}` : "0"),
+      caption: "Dolu sütun tamamlanan, açık sütun o güne planlanan görev sayısı (yalnızca bir güne atanmış görevler).",
+      emptyText: "Bu haftanın günlerine henüz görev atanmamış. Görev ekledikçe günlük tamamlama burada görünecek."
+    });
+  }
+
+  // Zamanlayıcı: son 7 günün odak dakikaları (focusStats)
+  function renderTimerFocusChart() {
+    const host = document.getElementById("timerFocusChart");
+    if (!host) return;
+    const today = getTodayISO();
+    const points = getFocusSeries(today, 7).map((p) => {
+      const lab = chartDayLabel(p.iso);
+      return {
+        ...p,
+        tip: p.value > 0
+          ? `${lab.day} ${lab.date}: ${formatMinutesTR(p.value)} odak, ${p.sessions} oturum`
+          : `${lab.day} ${lab.date}: kayıtlı odak oturumu yok`
+      };
+    });
+    const mins = sumSeries(points);
+    const totalEl = document.getElementById("timerFocusChartTotal");
+    if (totalEl) totalEl.textContent = mins > 0 ? `Toplam ${formatMinutesTR(mins)} · ${sumSeries(points, "sessions")} oturum` : "";
+    host.innerHTML = buildDayBarChart({
+      title: "Son 7 günün günlük odak süresi (dakika)",
+      points,
+      format: (p) => (p.value > 0 ? `${p.value} dk` : "0"),
+      caption: "Son 7 günde her gün zamanlayıcıyla tamamlanan ders/odak oturumlarının toplam dakikası.",
+      emptyText: "Son 7 günde kayıtlı odak oturumu yok. Bir ders oturumunu tamamladığında süresi burada görünecek."
+    });
+  }
+
+  // Erteleme Analizi: son 7 günde yapılan ertelemeler (postponeHistory.at)
+  function renderInsightsPostponeChart() {
+    const host = document.getElementById("insightsPostponeChart");
+    if (!host) return;
+    const today = getTodayISO();
+    const points = getPostponeSeries(today, 7).map((p) => {
+      const lab = chartDayLabel(p.iso);
+      return {
+        ...p,
+        tip: p.value > 0 ? `${lab.day} ${lab.date}: ${p.value} erteleme` : `${lab.day} ${lab.date}: erteleme yok`
+      };
+    });
+    const total = sumSeries(points);
+    const totalEl = document.getElementById("insightsPostponeChartTotal");
+    if (totalEl) totalEl.textContent = total > 0 ? `Toplam ${total} erteleme` : "";
+    host.innerHTML = buildDayBarChart({
+      title: "Son 7 günde günlere göre yapılan erteleme sayısı",
+      points,
+      tone: "warn",
+      caption: "Son 7 günde her gün kaç kez görev ertelendiği veya bugüne devredildiği (erteleme kayıtlarından).",
+      emptyText: "Son 7 günde hiç erteleme yapılmadı. Bir görevi ertelediğinde o gün burada sayılır."
+    });
   }
 
   function modernDelta(diff, unitLabel, goodWhenUp, compareLabel) {
@@ -941,6 +1113,8 @@
     renderModernSideGoals();
   }
 
+  // Günün Odağı özet kartları: yalnızca sayı ve metin (grafikler kendi sayfalarında).
+  // Kartın tamamı ilgili sayfayı açar ve oradaki grafik bölümüne kaydırır.
   function renderModernDailyStats() {
     const view = document.getElementById("view-daily");
     if (!view) return;
@@ -953,103 +1127,77 @@
       const quote = document.getElementById("quoteOfTheDayCard");
       if (quote && quote.nextSibling) view.insertBefore(row, quote.nextSibling);
       else view.prepend(row);
-      row.addEventListener("click", (e) => {
-        const b = e.target.closest("[data-m-open-view]");
-        if (b) switchView(b.getAttribute("data-m-open-view"));
-      });
+      // Tıklama: belgedeki ortak [data-nav-view] dinleyicisi (openInView) karşılar.
     }
 
     const sel = uiState.selectedDateISO || getTodayISO();
     const today = getTodayISO();
-    const dayTasks = (iso) => state.tasks.filter((t) => t.scope === "day" && t.date === iso);
 
-    // 1) Seçili günün görevleri: tamamlanan / planlanan, son 7 gün tamamlanan
-    const selTasks = dayTasks(sel);
-    const selDone = selTasks.filter((t) => t.completed).length;
-    const prevDone = dayTasks(addDaysISO(sel, -1)).filter((t) => t.completed).length;
-    const doneSeries = [];
-    for (let i = 6; i >= 0; i--) {
-      doneSeries.push(dayTasks(addDaysISO(sel, -i)).filter((t) => t.completed).length);
-    }
+    // 1) Seçili günün görevleri: tamamlanan / planlanan, önceki günle kıyas
+    const [prevDay, selDay] = getTaskDoneSeries(sel, 2);
+    const selPending = selDay.total - selDay.value;
 
-    // 2) Odak: son 7 gün toplam dakika (zamanlayıcı kayıtları), önceki 7 günle kıyas
-    const stats = state.focusStats || {};
-    const minsOn = (iso) => (stats[iso] && Number(stats[iso].minutes)) || 0;
-    const focusSeries = [];
-    let focus7 = 0;
-    let focusPrev7 = 0;
-    for (let i = 6; i >= 0; i--) {
-      const m = minsOn(addDaysISO(today, -i));
-      focusSeries.push(m);
-      focus7 += m;
-    }
-    for (let i = 13; i >= 7; i--) focusPrev7 += minsOn(addDaysISO(today, -i));
+    // 2) Odak: son 7 gün toplam dakika, önceki 7 günle kıyas
+    const focusSeries = getFocusSeries(today, 7);
+    const focus7 = sumSeries(focusSeries);
+    const focusPrev7 = sumSeries(getFocusSeries(addDaysISO(today, -7), 7));
+    const sessions7 = sumSeries(focusSeries, "sessions");
+    const focusToday = focusSeries[focusSeries.length - 1].value;
 
-    // 3) Erteleme: son 7 gündeki erteleme kayıtları (postponeHistory.at)
-    const postponeCountOn = {};
-    state.tasks.forEach((t) => {
-      (t.postponeHistory || []).forEach((h) => {
-        if (h && h.at) postponeCountOn[h.at] = (postponeCountOn[h.at] || 0) + 1;
-      });
-    });
-    const postSeries = [];
-    let post7 = 0;
-    let postPrev7 = 0;
-    for (let i = 6; i >= 0; i--) {
-      const c = postponeCountOn[addDaysISO(today, -i)] || 0;
-      postSeries.push(c);
-      post7 += c;
-    }
-    for (let i = 13; i >= 7; i--) postPrev7 += postponeCountOn[addDaysISO(today, -i)] || 0;
+    // 3) Erteleme: son 7 gündeki erteleme kayıtları, önceki 7 günle kıyas
+    const post7 = sumSeries(getPostponeSeries(today, 7));
+    const postPrev7 = sumSeries(getPostponeSeries(addDaysISO(today, -7), 7));
+    const postponedNow = state.tasks.filter((t) => !t.completed && (t.postponeCount || 0) > 0).length;
 
     const selLabel = sel === today ? "Bugün" : formatShortTR(sel);
     const card = (o) => `
-      <div class="m-stat">
+      <div class="m-stat is-navlink" role="link" tabindex="0" data-m-open-view="${o.view}" data-nav-view="${o.view}" data-nav-focus="${o.focus}" ${o.attrs || ""} title="${o.viewTitle}">
         <div class="m-stat-top">
           <span class="m-tile m-tile-lg ${o.tint}">${icon(o.icon, 19)}</span>
           <div>
             <div class="m-label-cap">${o.cap}</div>
             <div class="m-label-main">${o.main}</div>
           </div>
-          <button type="button" class="m-round-btn" data-m-open-view="${o.view}" title="${o.viewTitle}" aria-label="${o.viewTitle}">${icon("arrowUpRight", 14)}</button>
+          <span class="m-round-btn" aria-hidden="true">${icon("arrowUpRight", 14)}</span>
         </div>
-        <div class="m-label-cap m-stat-k">${o.k}</div>
-        <div class="m-big">${o.big}</div>
-        ${o.delta}
-        <div class="m-spark ${o.sparkColor}">${buildSparkSvg(o.series, o.glow)}${o.tip ? `<span class="m-spark-tip">${o.tip}</span>` : ""}</div>
+        <div class="m-stat-figs">
+          <div class="m-label-cap m-stat-k">${o.k}</div>
+          <div class="m-big">${o.big}</div>
+          ${o.delta}
+          <div class="m-stat-foot">${o.foot}</div>
+        </div>
       </div>`;
 
     row.innerHTML = [
       card({
         tint: "m-tint-accent", icon: "check", cap: "Günün Görevleri", main: "Tamamlanan",
-        view: "weekly", viewTitle: "Haftalık Plana git",
+        view: "weekly", focus: "chart:weekly-done", attrs: `data-nav-week="${sel}"`, viewTitle: "Haftalık Plan'da günlük tamamlama grafiğini aç",
         k: `${selLabel} · tamamlanan / planlanan`,
-        big: `${selDone}<span class="d">/${selTasks.length}</span>`,
-        delta: modernDelta(selDone - prevDone, "", true, "önceki güne göre"),
-        series: doneSeries, glow: "m-glow-accent", sparkColor: "m-glow-accent",
-        tip: ""
+        big: `${selDay.value}<span class="d">/${selDay.total}</span>`,
+        delta: modernDelta(selDay.value - prevDay.value, "", true, "önceki güne göre"),
+        foot: selDay.total === 0
+          ? "Bu güne görev atanmamış"
+          : selPending > 0 ? `${selPending} görev bekliyor` : "Hepsi tamamlandı"
       }),
       card({
         tint: "m-tint-blue", icon: "timer", cap: "Zamanlayıcı", main: "Son 7 gün odak",
-        view: "timer", viewTitle: "Zamanlayıcıya git",
+        view: "timer", focus: "chart:timer-focus", viewTitle: "Odak & Zamanlayıcı'da odak grafiğini aç",
         k: "Toplam odak süresi",
         big: `${focus7}<span class="u">dk</span>`,
         delta: focus7 === 0 && focusPrev7 === 0
           ? modernDelta(null, "", true, "henüz oturum kaydı yok")
           : modernDelta(focus7 - focusPrev7, " dk", true, "önceki 7 güne göre"),
-        series: focusSeries, glow: "m-glow-accent", sparkColor: "m-glow-accent",
-        tip: ""
+        foot: `${sessions7} oturum · bugün ${focusToday} dk`
       }),
       card({
         tint: "m-tint-coral", icon: "hourglass", cap: "Erteleme Analizi", main: "Ertelenen",
-        view: "insights", viewTitle: "Erteleme Analizine git",
+        view: "insights", focus: "chart:insights-postpone", viewTitle: "Erteleme Analizi'nde erteleme grafiğini aç",
         k: "Son 7 günde yapılan erteleme",
         big: `${post7}<span class="u">kez</span>`,
         delta: post7 === 0 && postPrev7 === 0
           ? modernDelta(null, "", false, "erteleme yok")
           : modernDelta(post7 - postPrev7, "", false, "önceki 7 güne göre"),
-        series: postSeries, glow: "m-glow-coral", sparkColor: "m-glow-coral",
-        tip: ""
+        foot: postponedNow > 0 ? `Şu an ${postponedNow} görev ertelenmiş bekliyor` : "Bekleyen ertelenmiş görev yok"
       })
     ].join("");
   }
@@ -1064,7 +1212,8 @@
       box.className = "m-side-goals m-only";
       nav.insertAdjacentElement("afterend", box);
       box.addEventListener("click", (e) => {
-        if (e.target.closest("[data-m-goal]")) switchView("goals");
+        const g = e.target.closest("[data-m-goal]");
+        if (g) openInView("goals", { focus: `goal:${g.getAttribute("data-m-goal")}` });
       });
     }
     const active = state.goals
@@ -1083,7 +1232,7 @@
       ${active
         .slice(0, 3)
         .map((g, i) => `
-        <button type="button" class="m-side-goal" data-m-goal="${g.id}" title="Hedef Pusulası'nda gör">
+        <button type="button" class="m-side-goal" data-m-goal="${g.id}" title="Hedef Pusulası'nda aç">
           <span class="m-tile ${tints[i % tints.length]}">${icon(g.horizon === "long" ? "mountain" : "bolt", 15)}</span>
           <span class="m-side-goal-text">
             <span class="m-side-goal-cap">${g.horizon === "long" ? "Uzun vadeli" : "Kısa vadeli"}${g.targetDate ? ` · ${formatShortTR(g.targetDate)}` : ""}</span>
@@ -1302,6 +1451,7 @@
   function createTaskCardElement(task, options = {}) {
     const card = document.createElement("div");
     card.className = `task-card ${task.completed ? "completed" : ""} ${task.priority === "postponed" || (task.postponeCount || 0) > 0 ? "is-postponed" : ""}`;
+    card.setAttribute("data-focus-key", `task:${task.id}`);
 
     const goal = task.goalId ? getGoalById(task.goalId) : null;
     const isExpanded = uiState.expandedTaskIds.has(task.id);
@@ -1318,7 +1468,7 @@
     }
 
     const goalBadge = goal
-      ? `<span class="badge badge-goal" data-jump-goal="${goal.id}" title="Hedefe git">${icon("target", 13)}${escapeHtml(goal.title)}</span>`
+      ? `<span class="badge badge-goal is-navlink" data-jump-goal="${goal.id}" role="link" tabindex="0" title="Hedef Pusulası'nda aç">${icon("target", 13)}${escapeHtml(goal.title)}</span>`
       : "";
 
     const categoryBadge = task.category
@@ -1329,12 +1479,14 @@
       task.scope === "week"
         ? `<span class="badge badge-weekpool">${icon("inbox", 13)}Haftalık Esnek</span>`
         : options.showDate && task.date
-        ? `<span class="badge badge-category">${icon("calendar", 13)}${formatShortTR(task.date)}</span>`
+        ? `<span class="badge badge-category is-navlink" role="link" tabindex="0" data-nav-view="daily" data-nav-date="${task.date}" data-nav-focus="task:${task.id}" title="Günün Odağı'nda ${formatShortTR(task.date)} gününü aç">${icon("calendar", 13)}${formatShortTR(task.date)}</span>`
         : "";
 
     const postponeBadge =
       (task.postponeCount || 0) > 0
-        ? `<span class="badge badge-postponed" title="Bu görev ${task.postponeCount} kez ertelendi">${icon("hourglass", 13)}${task.postponeCount}x ertelendi</span>`
+        ? options.noPostponeLink
+          ? `<span class="badge badge-postponed" title="Bu görev ${task.postponeCount} kez ertelendi">${icon("hourglass", 13)}${task.postponeCount}x ertelendi</span>`
+          : `<span class="badge badge-postponed is-navlink" role="link" tabindex="0" data-nav-view="insights" data-nav-focus="${task.completed ? "" : `task:${task.id}`}" title="Bu görev ${task.postponeCount} kez ertelendi · Erteleme Analizi'nde aç">${icon("hourglass", 13)}${task.postponeCount}x ertelendi</span>`
         : "";
 
     const subtasksBadge =
@@ -1531,12 +1683,12 @@
             </button>
             <div class="task-body">
               <div class="task-title-line">
-                <span class="task-title-text">${escapeHtml(r.title)}</span>
+                <span class="task-title-text is-navlink" role="link" tabindex="0" data-nav-view="routines" data-nav-focus="routine:${r.id}" title="Tekrarlayan Rutinler'de aç">${escapeHtml(r.title)}</span>
               </div>
               <div class="task-badges">
                 <span class="badge badge-streak">${icon("flame", 13)}${streak} gün seri</span>
                 <span class="badge badge-category">${icon("repeat", 13)}${getRoutineFreqLabel(r)}</span>
-                ${goal ? `<span class="badge badge-goal" data-jump-goal="${goal.id}">${icon("target", 13)}${escapeHtml(goal.title)}</span>` : ""}
+                ${goal ? `<span class="badge badge-goal is-navlink" data-jump-goal="${goal.id}" role="link" tabindex="0" title="Hedef Pusulası'nda aç">${icon("target", 13)}${escapeHtml(goal.title)}</span>` : ""}
               </div>
               ${r.note ? `<div class="task-note-preview">${escapeHtml(r.note)}</div>` : ""}
             </div>
@@ -1660,6 +1812,12 @@
         const item = document.createElement("div");
         item.style.cssText =
           "padding:10px 12px;background:var(--bg-input);border:1px solid var(--border-subtle);border-radius:8px;margin-bottom:8px;cursor:pointer;";
+        item.className = "is-navlink nav-card";
+        item.setAttribute("role", "link");
+        item.setAttribute("tabindex", "0");
+        item.setAttribute("title", "Hedef Pusulası'nda aç");
+        item.dataset.navView = "goals";
+        item.dataset.navFocus = `goal:${g.id}`;
         item.innerHTML = `
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;">
             <strong style="font-size:12.5px;">${icon(g.horizon === "long" ? "mountain" : "bolt", 13)} ${escapeHtml(g.title)}</strong>
@@ -1673,7 +1831,6 @@
             <span class="${timeStats.statusClass}">${timeStats.remainingLabel}</span>
           </div>
         `;
-        item.addEventListener("click", () => switchView("goals"));
         goalsPreviewEl.appendChild(item);
       });
     }
@@ -1725,7 +1882,7 @@
       col.innerHTML = `
         <div class="day-col-header">
           <div>
-            <div class="day-col-title">
+            <div class="day-col-title is-navlink" role="link" tabindex="0" data-nav-view="daily" data-nav-date="${dISO}" title="Günün Odağı'nda bu günü aç">
               ${TR_DAYS_FULL[dt.getDay()]}
               ${dISO === today ? `<span class="selected-day-badge" style="margin-left:6px;">BUGÜN</span>` : ""}
             </div>
@@ -1783,6 +1940,7 @@
     });
 
     renderWeeklySummary(weekMon);
+    renderWeeklyDoneChart(weekMon);
   }
 
   // ---------- Haftalık Özet ----------
@@ -1818,7 +1976,7 @@
     const goalNames = {};
     (state.goals || []).forEach((g) => { goalNames[g.id] = g.title; });
     const topGoals = Object.keys(byGoal)
-      .map((gid) => ({ title: goalNames[gid] || "Silinmiş hedef", minutes: byGoal[gid] }))
+      .map((gid) => ({ id: goalNames[gid] ? gid : "", title: goalNames[gid] || "Silinmiş hedef", minutes: byGoal[gid] }))
       .sort((a, b) => b.minutes - a.minutes)
       .slice(0, 3);
 
@@ -1849,7 +2007,7 @@
     const postponed = [];
     (state.tasks || []).forEach((t) => {
       const n = (t.postponeHistory || []).filter((h) => h && inWeek(h.at)).length;
-      if (n > 0) postponed.push({ title: t.title, count: n });
+      if (n > 0) postponed.push({ id: t.id, completed: Boolean(t.completed), title: t.title, count: n });
     });
     postponed.sort((a, b) => b.count - a.count);
 
@@ -1889,8 +2047,8 @@
       return;
     }
 
-    const kpi = (label, val, hint = "") => `
-      <div class="summary-kpi-card">
+    const kpi = (label, val, hint = "", nav = null) => `
+      <div class="summary-kpi-card${nav ? " is-navlink nav-card" : ""}"${nav ? ` role="link" tabindex="0" ${navAttrsHtml(nav)} title="${escapeHtml(nav.label)}"` : ""}>
         <div class="summary-kpi-label">${label}</div>
         <div class="summary-kpi-val">${val}</div>
         ${hint ? `<div class="weekly-summary-hint">${hint}</div>` : ""}
@@ -1898,19 +2056,24 @@
 
     const kpis = [
       kpi(`${icon("timer", 15)}Toplam Odak`, s.minutes > 0 ? formatMinutesTR(s.minutes) : "—",
-        s.minutes > 0 ? `${s.sessions} oturum` : "Kayıtlı oturum yok"),
+        s.minutes > 0 ? `${s.sessions} oturum` : "Kayıtlı oturum yok",
+        { view: "timer", focus: "chart:timer-focus", label: "Odak & Zamanlayıcı'da aç" }),
       kpi(`${icon("list", 15)}Görevler`, s.tasksPlanned > 0 ? `${s.tasksDone} / ${s.tasksPlanned}` : "—",
         s.tasksPlanned > 0 ? `%${Math.round((s.tasksDone / s.tasksPlanned) * 100)} tamamlandı · bu haftaya atanmış` : "Bu haftaya görev atanmamış"),
       kpi(`${icon("repeat", 15)}Rutin Uyumu`, s.routineDue > 0 ? `%${Math.round((s.routineDone / s.routineDue) * 100)}` : "—",
-        s.routineDue > 0 ? `${s.routineDone} / ${s.routineDue} planlı gün` : "Bu hafta planlı rutin günü yok"),
+        s.routineDue > 0 ? `${s.routineDone} / ${s.routineDue} planlı gün` : "Bu hafta planlı rutin günü yok",
+        { view: "routines", label: "Tekrarlayan Rutinler'de aç" }),
       kpi(`${icon("hourglass", 15)}Erteleme`, s.postponedTotal > 0 ? `${s.postponedTotal} kez` : "0",
-        s.postponedTotal > 0 ? "bu hafta yapılan ertelemeler" : "Bu hafta erteleme yok")
+        s.postponedTotal > 0 ? "bu hafta yapılan ertelemeler" : "Bu hafta erteleme yok",
+        { view: "insights", focus: "chart:insights-postpone", label: "Erteleme Analizi'nde aç" })
     ].join("");
 
     let goalsHtml;
     if (s.topGoals.length > 0) {
       goalsHtml = s.topGoals.map((g) =>
-        `<div class="weekly-summary-row"><span>${escapeHtml(g.title)}</span><span>${formatMinutesTR(g.minutes)}</span></div>`
+        g.id
+          ? `<div class="weekly-summary-row is-navlink nav-row" role="link" tabindex="0" data-nav-view="goals" data-nav-focus="goal:${g.id}" title="Hedef Pusulası'nda aç"><span>${escapeHtml(g.title)}</span><span>${formatMinutesTR(g.minutes)}</span></div>`
+          : `<div class="weekly-summary-row"><span>${escapeHtml(g.title)}</span><span>${formatMinutesTR(g.minutes)}</span></div>`
       ).join("");
       if (s.untrackedGoalMinutes > 0) {
         goalsHtml += `<div class="weekly-summary-note">Hedef dağılımı kaydı başlamadan önceki ${formatMinutesTR(s.untrackedGoalMinutes)} dahil değil.</div>`;
@@ -1925,7 +2088,7 @@
 
     const postponedHtml = s.postponedTop.length > 0
       ? s.postponedTop.map((p) =>
-          `<div class="weekly-summary-row"><span>${escapeHtml(p.title)}</span><span>${p.count}x</span></div>`
+          `<div class="weekly-summary-row is-navlink nav-row" role="link" tabindex="0" data-nav-view="insights" data-nav-focus="${p.completed ? "chart:insights-postpone" : `task:${p.id}`}" title="Erteleme Analizi'nde aç"><span>${escapeHtml(p.title)}</span><span>${p.count}x</span></div>`
         ).join("")
       : `<div class="weekly-summary-note">Bu hafta ertelenen görev yok. 👏</div>`;
 
@@ -2033,6 +2196,9 @@
         uiState.calendarMonth = c.month;
         renderAll();
       });
+      // Çift tıklama: o günü Günün Odağı'nda aç
+      cellEl.title = `${formatShortTR(c.iso)} · Çift tıkla: Günün Odağı'nda aç`;
+      cellEl.addEventListener("dblclick", () => openInView("daily", { date: c.iso }));
       miniGrid.appendChild(cellEl);
     });
 
@@ -2050,6 +2216,12 @@
         const isDeadlineToday = g.targetDate === selDate;
         const div = document.createElement("div");
         div.style.cssText = "padding:10px 12px;background:var(--bg-input);border:1px solid var(--border-subtle);border-radius:8px;";
+        div.className = "is-navlink nav-card";
+        div.setAttribute("role", "link");
+        div.setAttribute("tabindex", "0");
+        div.setAttribute("title", "Hedef Pusulası'nda aç");
+        div.dataset.navView = "goals";
+        div.dataset.navFocus = `goal:${g.id}`;
         div.innerHTML = `
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <strong style="font-size:12.5px;">${icon(g.horizon === "long" ? "mountain" : "bolt", 13)} ${escapeHtml(g.title)}</strong>
@@ -2101,7 +2273,7 @@
       // Hedef Vade Sonu varsa en üstte göster
       deadlineGoals.forEach((g) => {
         pillsHtml.push(
-          `<div class="cal-pill-item goal-deadline" title="Hedef Vade Bitişi: ${escapeHtml(g.title)}">${escapeHtml(g.title)}</div>`
+          `<div class="cal-pill-item goal-deadline is-navlink" role="link" tabindex="0" data-nav-view="goals" data-nav-focus="goal:${g.id}" title="Hedef Vade Bitişi: ${escapeHtml(g.title)} · Hedef Pusulası'nda aç">${escapeHtml(g.title)}</div>`
         );
       });
 
@@ -2132,13 +2304,21 @@
         </div>
       `;
 
-      cell.addEventListener("click", () => {
+      cell.addEventListener("click", (e) => {
+        // Hedef vade etiketi kendi sayfasını açar (belgedeki ortak dinleyici)
+        if (e.target.closest("[data-nav-view]")) return;
         uiState.selectedDateISO = c.iso;
         if (!c.isCurrentMonth) {
           uiState.calendarYear = c.year;
           uiState.calendarMonth = c.month;
         }
         renderAll();
+      });
+      // Çift tıklama: o günü Günün Odağı'nda aç (tek tıklama sağdaki panelde seçer)
+      cell.title = `${formatShortTR(c.iso)} · Çift tıkla: Günün Odağı'nda aç`;
+      cell.addEventListener("dblclick", (e) => {
+        if (e.target.closest("[data-nav-view]")) return;
+        openInView("daily", { date: c.iso });
       });
 
       cellsGrid.appendChild(cell);
@@ -2161,6 +2341,12 @@
       const gBanner = document.createElement("div");
       gBanner.style.cssText =
         "padding:10px 12px;background:var(--purple-soft);border:1px solid var(--purple);border-radius:8px;font-size:12.5px;";
+      gBanner.className = "is-navlink nav-card";
+      gBanner.setAttribute("role", "link");
+      gBanner.setAttribute("tabindex", "0");
+      gBanner.setAttribute("title", "Hedef Pusulası'nda aç");
+      gBanner.dataset.navView = "goals";
+      gBanner.dataset.navFocus = `goal:${g.id}`;
       gBanner.innerHTML = `
         <strong>Hedef Vade Günü:</strong> ${escapeHtml(g.title)}
         <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px;">İlerleme: %${calculateGoalProgress(g)}</div>
@@ -2208,7 +2394,7 @@
               ${done ? "✓" : ""}
             </button>
             <div class="task-body">
-              <span class="task-title-text" style="font-size:13px;">${escapeHtml(r.title)}</span>
+              <span class="task-title-text is-navlink" role="link" tabindex="0" data-nav-view="routines" data-nav-focus="routine:${r.id}" title="Tekrarlayan Rutinler'de aç" style="font-size:13px;">${escapeHtml(r.title)}</span>
               <span class="badge badge-streak" style="margin-left:6px;">${icon("flame", 13)}${calculateRoutineStreak(r)}</span>
             </div>
           </div>
@@ -2321,7 +2507,7 @@
         }
 
         row.innerHTML = `
-          <div class="roadmap-goal-name" title="${escapeHtml(g.title)}">
+          <div class="roadmap-goal-name is-navlink" role="link" tabindex="0" data-nav-view="goals" data-nav-focus="goal:${g.id}" title="${escapeHtml(g.title)} · Hedef Pusulası'nda aç">
             ${icon(g.horizon === "long" ? "mountain" : "bolt", 13)} ${escapeHtml(g.title)}
           </div>
           ${slotsHtml}
@@ -2483,6 +2669,7 @@
 
       const card = document.createElement("div");
       card.className = `goal-card horizon-${goal.horizon}`;
+      card.setAttribute("data-focus-key", `goal:${goal.id}`);
 
       card.innerHTML = `
         <div class="goal-header">
@@ -2494,7 +2681,7 @@
             <h3 class="goal-title">${escapeHtml(goal.title)}</h3>
             ${
               parentGoal
-                ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:3px;">${icon("link", 12)} Üst Vizyon: <strong>${escapeHtml(parentGoal.title)}</strong></div>`
+                ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:3px;">${icon("link", 12)} Üst Vizyon: <strong class="is-navlink" role="link" tabindex="0" data-nav-view="goals" data-nav-focus="goal:${parentGoal.id}" title="Üst hedefi göster">${escapeHtml(parentGoal.title)}</strong></div>`
                 : ""
             }
           </div>
@@ -2573,7 +2760,7 @@
                   .slice(0, 4)
                   .map(
                     (t) => `
-                <div style="display:flex;align-items:center;justify-content:space-between;font-size:12.5px;padding:5px 8px;background:var(--bg-input);border-radius:6px;">
+                <div class="is-navlink nav-row" role="link" tabindex="0" ${t.scope === "week" ? `data-nav-view="weekly" data-nav-week="${t.weekMonday || getWeekMondayISO(getTodayISO())}"` : `data-nav-view="daily" data-nav-date="${t.date}"`} data-nav-focus="task:${t.id}" title="${t.scope === "week" ? "Haftalık Plan'da aç" : "Günün Odağı'nda aç"}" style="display:flex;align-items:center;justify-content:space-between;font-size:12.5px;padding:5px 8px;background:var(--bg-input);border-radius:6px;">
                   <span style="${t.completed ? "text-decoration:line-through;color:var(--text-muted);" : ""}">
                     ${t.completed ? "✓" : "○"} ${escapeHtml(t.title)}
                   </span>
@@ -2944,6 +3131,7 @@
       taskSel.value = cur;
     }
 
+    renderTimerFocusChart();
     renderRoomTogether();
     updateTimerDOM();
     maybeClearRoomChatUnread();
@@ -3035,6 +3223,7 @@
 
       const card = document.createElement("div");
       card.className = "routine-card";
+      card.setAttribute("data-focus-key", `routine:${routine.id}`);
 
       card.innerHTML = `
         <div class="routine-streak-row">
@@ -3052,7 +3241,7 @@
           <h4 style="font-size:15.5px;font-weight:700;">${escapeHtml(routine.title)}</h4>
           <div class="task-badges" style="margin-top:6px;">
             <span class="badge badge-category">${icon("repeat", 13)}${getRoutineFreqLabel(routine)}</span>
-            ${goal ? `<span class="badge badge-goal" data-jump-goal="${goal.id}">${icon("target", 13)}${escapeHtml(goal.title)}</span>` : ""}
+            ${goal ? `<span class="badge badge-goal is-navlink" data-jump-goal="${goal.id}" role="link" tabindex="0" title="Hedef Pusulası'nda aç">${icon("target", 13)}${escapeHtml(goal.title)}</span>` : ""}
           </div>
         </div>
 
@@ -3149,11 +3338,13 @@
         <div class="summary-kpi-label">${icon("repeat", 15)}Kronik Ertelenen (2+ Kez)</div>
         <div class="summary-kpi-val" style="color:var(--warning);">${chronicTasks.length}</div>
       </div>
-      <div class="summary-kpi-card">
+      <div class="summary-kpi-card is-navlink nav-card" role="link" tabindex="0" data-nav-view="notes" title="Notlarım'da aç">
         <div class="summary-kpi-label">${icon("note", 15)}Kayıtlı Not & Yansıma</div>
         <div class="summary-kpi-val">${totalNotesCount}</div>
       </div>
     `;
+
+    renderInsightsPostponeChart();
 
     // Sol: Ertelenen Görevler Analizi
     const postponedListEl = document.getElementById("postponedTasksAnalysisList");
@@ -3170,7 +3361,7 @@
       `;
     } else {
       activePostponed.forEach((t) => {
-        postponedListEl.appendChild(createTaskCardElement(t, { showDate: true }));
+        postponedListEl.appendChild(createTaskCardElement(t, { showDate: true, noPostponeLink: true }));
       });
     }
 
@@ -3188,7 +3379,8 @@
             type: "Görev Notu",
             date: t.date || t.createdAt || getTodayISO(),
             title: t.title,
-            text: t.note
+            text: t.note,
+            nav: taskNavAttrs(t)
           });
         }
       });
@@ -3202,7 +3394,8 @@
             type: "Günlük Not",
             date: dISO,
             title: `${formatFullTR(dISO)} Günlük Notu`,
-            text
+            text,
+            nav: { view: "daily", date: dISO, label: "Günün Odağı'nda o günü aç" }
           });
         }
       });
@@ -3212,7 +3405,8 @@
             type: "Haftalık Odak Notu",
             date: wISO,
             title: `${formatWeekRangeTR(wISO)} Haftalık Notu`,
-            text
+            text,
+            nav: { view: "weekly", week: wISO, label: "Haftalık Plan'da o haftayı aç" }
           });
         }
       });
@@ -3226,7 +3420,8 @@
             type: "Erteleme Kaydı",
             date: h.at || t.date || getTodayISO(),
             title: t.title,
-            text: `${formatShortTR(h.from)} → ${formatShortTR(h.to)} | Sebep: ${h.reason || "Belirtilmedi"}`
+            text: `${formatShortTR(h.from)} → ${formatShortTR(h.to)} | Sebep: ${h.reason || "Belirtilmedi"}`,
+            nav: taskNavAttrs(t)
           });
         });
       });
@@ -3239,7 +3434,8 @@
           type: "Kaydedilen Günün Sözü",
           date: sq.savedAt || getTodayISO(),
           title: `${sq.author} (${sq.source || "Alıntı"})`,
-          text: `"${sq.text}"`
+          text: `"${sq.text}"`,
+          nav: { view: "notes", notes: "quotes", label: "Notlarım'da kaydedilen sözleri aç" }
         });
       });
     }
@@ -3267,7 +3463,7 @@
             <span>${escapeHtml(item.type)}</span>
             <span>${formatShortTR(item.date)}</span>
           </div>
-          <div class="archive-note-title">${escapeHtml(item.title)}</div>
+          <div class="archive-note-title">${item.nav ? `<span class="is-navlink" role="link" tabindex="0" ${navAttrsHtml(item.nav)} title="${escapeHtml(item.nav.label)}">${escapeHtml(item.title)}</span>` : escapeHtml(item.title)}</div>
           <div class="archive-note-text">${escapeHtml(item.text)}</div>
         `;
         archiveEl.appendChild(div);
@@ -3741,6 +3937,9 @@
           <button class="btn btn-ghost btn-xs" data-action="jump-note-date" data-date="${item.dateISO}">
             ${icon("calendar", 13)} Tarihe Git
           </button>
+          ${item.itemType === "goal"
+            ? `<button class="btn btn-ghost btn-xs" data-nav-view="goals" data-nav-focus="goal:${item.rawId}" title="Hedef Pusulası'nda aç">${icon("target", 13)} Hedefi Aç</button>`
+            : ""}
           <button class="btn btn-secondary btn-xs" data-action="${item.itemType === "task" ? "edit-task" : "edit-goal"}" data-id="${item.rawId}">
             ${icon("edit", 13)} Düzenle
           </button>
@@ -3864,6 +4063,118 @@
     }
     window.scrollTo({ top: 0, behavior: "smooth" });
     renderAll();
+  }
+
+  // ---------- Öğeyi kendi sayfasında aç ----------
+  // switchView ile sayfayı değiştirir; istenirse hedef öğeyi (data-focus-key)
+  // görünür kılar (filtre/sekme/tarih), ortalar ve kısa süre vurgular.
+  // focus: "goal:<id>" | "routine:<id>" | "task:<id>" | "chart:<ad>"
+  const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+  function taskNavAttrs(t) {
+    if (!t) return null;
+    if (t.scope === "week") {
+      return { view: "weekly", week: t.weekMonday || getTodayISO(), focus: `task:${t.id}`, label: "Haftalık Plan'da aç" };
+    }
+    if (t.date && ISO_DATE_RE.test(t.date)) {
+      return { view: "daily", date: t.date, focus: `task:${t.id}`, label: "Günün Odağı'nda aç" };
+    }
+    return null;
+  }
+
+  function navAttrsHtml(nav) {
+    if (!nav) return "";
+    const attr = (k, v) => (v ? ` data-nav-${k}="${escapeHtml(String(v))}"` : "");
+    return `data-nav-view="${escapeHtml(nav.view)}"${attr("focus", nav.focus)}${attr("date", nav.date)}${attr("week", nav.week)}${attr("notes", nav.notes)}`;
+  }
+
+  function syncPills(attr, value) {
+    document.querySelectorAll(`[${attr}]`).forEach((b) => b.classList.toggle("active", b.getAttribute(attr) === value));
+  }
+
+  function goalVisibleUnderFilter(g, f) {
+    if (f === "short") return g.horizon === "short" && !g.completed;
+    if (f === "long") return g.horizon === "long" && !g.completed;
+    if (f === "completed") return Boolean(g.completed);
+    return true;
+  }
+
+  function prepareFocusTarget(viewName, kind, id) {
+    if (kind === "goal") {
+      const g = getGoalById(id);
+      if (g && !goalVisibleUnderFilter(g, uiState.goalFilter)) {
+        uiState.goalFilter = "all";
+        syncPills("data-goal-filter", "all");
+      }
+    } else if (kind === "routine") {
+      const r = state.routines.find((x) => x.id === id);
+      if (r) uiState.routineTab = r.status || "active";
+    } else if (kind === "task") {
+      const t = state.tasks.find((x) => x.id === id);
+      if (!t) return;
+      if (viewName === "daily") {
+        if (t.scope === "day" && t.date && ISO_DATE_RE.test(t.date)) uiState.selectedDateISO = t.date;
+        const isPost = t.priority === "postponed" || (t.postponeCount || 0) > 0;
+        const f = uiState.dailyFilter;
+        const hidden = (f === "pending" && t.completed) || (f === "done" && !t.completed) || (f === "postponed" && !isPost);
+        if (hidden) {
+          uiState.dailyFilter = "all";
+          syncPills("data-daily-filter", "all");
+        }
+      } else if (viewName === "weekly") {
+        uiState.selectedWeekMondayISO = getWeekMondayISO(t.scope === "week" ? t.weekMonday || getTodayISO() : t.date || getTodayISO());
+      }
+    }
+  }
+
+  function flashFocusTarget(viewName, key) {
+    const sec = document.getElementById(`view-${viewName}`);
+    if (!sec) return false;
+    const sel = `[data-focus-key="${window.CSS && CSS.escape ? CSS.escape(key) : key}"]`;
+    const el = Array.from(sec.querySelectorAll(sel)).find((x) => x.offsetParent !== null) || sec.querySelector(sel);
+    if (!el) return false;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.remove("nav-focus-flash");
+    void el.offsetWidth; // animasyonu yeniden başlat
+    el.classList.add("nav-focus-flash");
+    setTimeout(() => el.classList.remove("nav-focus-flash"), 2200);
+    if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
+    try {
+      el.focus({ preventScroll: true });
+    } catch (_) {}
+    return true;
+  }
+
+  function openInView(viewName, opts = {}) {
+    if (!viewName || !VIEW_META[viewName]) return;
+    const focus = opts.focus || "";
+    const sep = focus.indexOf(":");
+    const kind = sep > 0 ? focus.slice(0, sep) : "";
+    const id = sep > 0 ? focus.slice(sep + 1) : "";
+
+    if (opts.date === "today") uiState.selectedDateISO = getTodayISO();
+    else if (opts.date && ISO_DATE_RE.test(opts.date)) uiState.selectedDateISO = opts.date;
+    if (opts.week === "this") uiState.selectedWeekMondayISO = getWeekMondayISO(getTodayISO());
+    else if (opts.week && ISO_DATE_RE.test(opts.week)) uiState.selectedWeekMondayISO = getWeekMondayISO(opts.week);
+    if (opts.notes) uiState.compiledNoteFilter = opts.notes;
+    if (kind) prepareFocusTarget(viewName, kind, id);
+
+    switchView(viewName);
+
+    // Dar ekranda yatay menü şeridinde aktif sayfa görünür kalsın
+    const nav = document.querySelector(".nav-menu");
+    const act = nav && nav.querySelector(".nav-item.active");
+    if (nav && act && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, act.offsetLeft - 12);
+
+    if (focus) {
+      // switchView'in sayfa başına kaydırmasından sonra hedefe kaydır
+      setTimeout(() => {
+        // Görev artık ertelenmiş listesinde değilse (ör. tamamlandı) erteleme grafiğine git
+        if (!flashFocusTarget(viewName, focus) && viewName === "insights") {
+          flashFocusTarget(viewName, "chart:insights-postpone");
+        }
+      }, 30);
+    }
   }
 
   // =========================================================
@@ -5624,6 +5935,31 @@
       btn.addEventListener("click", () => switchView(btn.dataset.openView));
     });
 
+    // "Kendi sayfasında aç" bağlantıları: [data-nav-view] taşıyan öğeler.
+    // Öğenin içindeki kendi kontrolleri (düğme, onay kutusu, girdi, eylem) önceliklidir.
+    document.addEventListener("click", (e) => {
+      const navEl = e.target.closest("[data-nav-view]");
+      if (!navEl) return;
+      const ctl = e.target.closest("button, a, input, select, textarea, label, [data-action], [data-jump-goal]");
+      if (ctl && ctl !== navEl && navEl.contains(ctl)) return;
+      e.preventDefault();
+      openInView(navEl.dataset.navView, {
+        focus: navEl.dataset.navFocus || "",
+        date: navEl.dataset.navDate || "",
+        week: navEl.dataset.navWeek || "",
+        notes: navEl.dataset.navNotes || ""
+      });
+    });
+    // Klavye: role="link" ile işaretli bağlantılar Enter / Boşluk ile açılır
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      const el = e.target;
+      if (!el || !el.classList || !el.classList.contains("is-navlink")) return;
+      if (el.matches("button, a, input, select, textarea")) return;
+      e.preventDefault();
+      el.click();
+    });
+
     // Dar ekran menü düğmesi (yalnızca görünüm: hızlı eylemler + ayarlar panelini aç/kapat)
     const btnMobileMenu = document.getElementById("btnMobileMenu");
     const sidebarEl = document.querySelector(".sidebar");
@@ -7024,7 +7360,7 @@
 
       const jumpGoal = e.target.closest("[data-jump-goal]");
       if (jumpGoal) {
-        switchView("goals");
+        openInView("goals", { focus: `goal:${jumpGoal.dataset.jumpGoal}` });
       }
     });
 

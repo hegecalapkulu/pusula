@@ -164,15 +164,15 @@
           </div>
 
           <div class="header-stats">
-            <div class="mini-stat" title="Bugünkü tamamlanma oranı">
+            <div class="mini-stat is-navlink" role="link" tabindex="0" data-nav-view="daily" data-nav-date="today" title="Bugünkü tamamlanma oranı · Günün Odağı'nda aç">
               <span class="mini-stat-label">Bugün</span>
               <strong class="mini-stat-val" id="statTodayRatio">0/0</strong>
             </div>
-            <div class="mini-stat" title="Bu haftaki tamamlanma oranı">
+            <div class="mini-stat is-navlink" role="link" tabindex="0" data-nav-view="weekly" data-nav-week="this" title="Bu haftaki tamamlanma oranı · Haftalık Plan'da aç">
               <span class="mini-stat-label">Bu Hafta</span>
               <strong class="mini-stat-val" id="statWeekRatio">0%</strong>
             </div>
-            <div class="mini-stat" title="Aktif Hedef İlerlemesi">
+            <div class="mini-stat is-navlink" role="link" tabindex="0" data-nav-view="goals" title="Aktif Hedef İlerlemesi · Hedef Pusulası'nda aç">
               <span class="mini-stat-label">Hedefler</span>
               <strong class="mini-stat-val" id="statGoalsAvg">0%</strong>
             </div>
@@ -214,6 +214,7 @@
           <div id="savedQuotesDrawer" class="saved-quotes-drawer hidden">
             <div class="saved-quotes-header">
               <span><strong>Kaydedilen Sözlerim Koleksiyonu</strong> (Ayrıca sağdaki <em>Günün Notu</em> kutusuna ve <em>Not Arşivi</em> sayfasına da eklenir)</span>
+              <button type="button" class="btn btn-ghost btn-xs" data-nav-view="notes" data-nav-notes="quotes" title="Notlarım'da kaydedilen sözleri aç">Notlarım'da Gör →</button>
             </div>
             <div id="savedQuotesList" class="saved-quotes-list"></div>
           </div>
@@ -426,6 +427,18 @@
             </div>
           </div>
           <div id="weeklySummaryBody"></div>
+        </div>
+
+        <!-- Günlük tamamlama grafiği (seçili hafta, kayıtlı görevlerden) -->
+        <div class="panel-card day-chart-card" id="weeklyDoneChartCard" data-focus-key="chart:weekly-done">
+          <div class="panel-header">
+            <div>
+              <h4 class="panel-title">Günlere Göre Tamamlanan Görevler</h4>
+              <p class="panel-subtitle">Seçili haftanın her günü için tamamlanan / planlanan</p>
+            </div>
+            <span class="day-chart-total" id="weeklyDoneChartTotal"></span>
+          </div>
+          <div id="weeklyDoneChart"></div>
         </div>
       </section>
 
@@ -702,6 +715,15 @@
                 <strong class="mini-stat-val" id="statRoomStreak">0 gün</strong>
               </div>
             </div>
+
+            <!-- Son 7 günün odak süresi grafiği (zamanlayıcı kayıtlarından) -->
+            <div class="day-chart-block" id="timerFocusChartCard" data-focus-key="chart:timer-focus">
+              <div class="day-chart-block-head">
+                <h4 class="panel-title">Son 7 Gün Odak Süresi</h4>
+                <span class="day-chart-total" id="timerFocusChartTotal"></span>
+              </div>
+              <div id="timerFocusChart"></div>
+            </div>
           </div>
 
           <!-- SAĞ SÜTUN: SES EFEKTLERİ & AMBİYANS -->
@@ -805,6 +827,18 @@
            ========================================================= -->
       <section class="view-section" id="view-insights">
         <div class="insights-top-cards" id="insightsStatsRow"></div>
+
+        <!-- Son 7 günün erteleme grafiği (erteleme kayıtlarından) -->
+        <div class="panel-card day-chart-card" id="insightsPostponeChartCard" data-focus-key="chart:insights-postpone">
+          <div class="panel-header">
+            <div>
+              <h4 class="panel-title">Son 7 Gün Erteleme Eğilimi</h4>
+              <p class="panel-subtitle">Hangi günlerde daha çok erteleme yaptığını gör</p>
+            </div>
+            <span class="day-chart-total" id="insightsPostponeChartTotal"></span>
+          </div>
+          <div id="insightsPostponeChart"></div>
+        </div>
 
         <div class="insights-grid">
           <!-- Sol: Ertelenen Görevler & Sürdürülebilirlik Koçu -->
