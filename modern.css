@@ -2719,3 +2719,46 @@ html[data-style="modern"][data-theme="light"] .mini-stat.is-navlink:hover {
 html[data-style="modern"] .nav-row.is-navlink:hover {
   background-color: var(--m-highlight) !important;
 }
+
+/* ---------- Haftayı Bitir & Oda Geçmişi ---------- */
+html[data-style="modern"] .modal-week-wrap {
+  max-width: 800px;
+}
+html[data-style="modern"] .week-wrap-h {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+html[data-style="modern"] .week-wrap-day,
+html[data-style="modern"] .week-wrap-note,
+html[data-style="modern"] .room-history-empty {
+  background: linear-gradient(180deg, var(--m-inner-top), var(--m-inner-bot));
+  border-color: var(--m-line-strong);
+  border-radius: 12px;
+}
+html[data-style="modern"] .week-wrap-day.is-today {
+  border-color: rgba(var(--accent-rgb), 0.6);
+}
+html[data-style="modern"] .week-wrap-h em,
+html[data-style="modern"] .week-wrap-group-head em {
+  background: var(--m-chip);
+  border-color: transparent;
+}
+html[data-style="modern"] .week-wrap-group-head.is-navlink:hover {
+  background-color: var(--m-highlight);
+}
+html[data-style="modern"] .week-wrap-kpis .summary-kpi-val,
+html[data-style="modern"] .room-history-kpis .summary-kpi-val {
+  font-size: 26px;
+}
+html[data-style="modern"] .room-history-block {
+  max-width: none;
+}
+@media (max-width: 560px) {
+  html[data-style="modern"] .week-wrap-kpis .summary-kpi-val,
+  html[data-style="modern"] .room-history-kpis .summary-kpi-val {
+    font-size: 22px;
+  }
+  html[data-style="modern"] .week-wrap-day {
+    border-radius: 10px;
+  }
+}

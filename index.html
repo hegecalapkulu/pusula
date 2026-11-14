@@ -381,6 +381,7 @@
             <h3 id="weekRangeTitle">26 Ekim – 1 Kasım 2026</h3>
           </div>
           <div class="day-nav-right">
+            <button type="button" class="btn btn-secondary btn-sm" id="btnOpenWeekWrap" title="Bu haftanın tam özetini aç (hiçbir şeyi değiştirmez)">Haftayı Bitir</button>
             <button class="btn btn-ghost btn-sm" id="btnGoThisWeek">Bu Haftaya Dön</button>
             <button class="btn btn-ghost btn-sm" id="btnNextWeek">Sonraki Hafta →</button>
           </div>
@@ -714,6 +715,15 @@
                 <span class="mini-stat-label">Ortak Seri</span>
                 <strong class="mini-stat-val" id="statRoomStreak">0 gün</strong>
               </div>
+            </div>
+
+            <!-- ORTAK ODA GEÇMİŞİ: kiminle, kaç gün, kaç dakika (bu cihazdaki kayıtlardan) -->
+            <div class="day-chart-block room-history-block hidden" id="roomHistoryCard" data-focus-key="chart:room-history">
+              <div class="day-chart-block-head">
+                <h4 class="panel-title">Oda Geçmişi</h4>
+                <span class="day-chart-total" id="roomHistoryTotal"></span>
+              </div>
+              <div id="roomHistoryBody"></div>
             </div>
 
             <!-- Son 7 günün odak süresi grafiği (zamanlayıcı kayıtlarından) -->
@@ -1356,6 +1366,27 @@
         <div class="modal-footer" style="margin-top:4px;">
           <button type="button" class="btn btn-ghost" data-close-modal="modalResetData">Vazgeç</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HAFTAYI BİTİR: haftanın salt okunur özeti (hiçbir veriyi taşımaz/değiştirmez) -->
+  <div class="modal-backdrop hidden" id="modalWeekWrap" role="dialog" aria-modal="true" aria-labelledby="weekWrapTitle">
+    <div class="modal-card modal-week-wrap">
+      <div class="modal-header">
+        <div class="week-wrap-head">
+          <h3 id="weekWrapTitle">Haftayı Bitir</h3>
+          <div class="week-wrap-range" id="weekWrapRange"></div>
+        </div>
+        <button type="button" class="btn-close" aria-label="Kapat" data-close-modal="modalWeekWrap">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="week-wrap-nav">
+          <button type="button" class="btn btn-ghost btn-xs" id="btnWeekWrapPrev">← Önceki Hafta</button>
+          <span class="week-wrap-hint">Yalnızca özet: hiçbir görev taşınmaz, tamamlanmaz ya da değiştirilmez.</span>
+          <button type="button" class="btn btn-ghost btn-xs" id="btnWeekWrapNext">Sonraki Hafta →</button>
+        </div>
+        <div id="weekWrapContent"></div>
       </div>
     </div>
   </div>

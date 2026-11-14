@@ -4586,3 +4586,257 @@ strong.is-navlink {
     font-size: 9.5px;
   }
 }
+
+/* =========================================================
+   Haftayı Bitir (salt okunur hafta özeti penceresi)
+   ========================================================= */
+#view-weekly .day-nav-right {
+  flex-wrap: wrap;
+}
+.modal-week-wrap {
+  max-width: 780px;
+}
+.week-wrap-head {
+  min-width: 0;
+}
+.week-wrap-range {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.week-wrap-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.week-wrap-hint {
+  flex: 1 1 200px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+#weekWrapContent {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.week-wrap-kpis {
+  margin-bottom: 0;
+}
+.week-wrap-section {
+  min-width: 0;
+}
+.week-wrap-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin: 0 0 8px;
+  font-family: inherit;
+}
+.week-wrap-h .ic {
+  color: var(--accent-text);
+  flex-shrink: 0;
+}
+.week-wrap-h em,
+.week-wrap-group-head em {
+  font-style: normal;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 0 7px;
+}
+.week-wrap-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px;
+}
+.week-wrap-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+.week-wrap-day {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  padding: 8px 6px;
+  text-align: center;
+  min-width: 0;
+}
+.week-wrap-day.is-today {
+  border-color: var(--accent-text);
+}
+.week-wrap-day.is-empty {
+  opacity: 0.6;
+}
+.week-wrap-day-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.week-wrap-day-name span {
+  display: block;
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.week-wrap-day-val {
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.week-wrap-day-val small {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.week-wrap-row {
+  align-items: flex-start;
+}
+.week-wrap-row-main {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+.week-wrap-row-sub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+.nav-row.is-navlink:hover .week-wrap-row-title {
+  color: var(--accent-text);
+}
+.week-wrap-group + .week-wrap-group {
+  margin-top: 10px;
+}
+.week-wrap-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 4px;
+  border-radius: 4px;
+  min-width: 0;
+}
+.week-wrap-group-head span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.week-wrap-group-head .ic {
+  flex-shrink: 0;
+  color: var(--accent-text);
+}
+.week-wrap-group-head.is-navlink:hover {
+  background-color: var(--bg-card-hover);
+  color: var(--accent-text);
+}
+.week-wrap-group .week-wrap-row {
+  padding-left: 22px;
+}
+.week-wrap-room-sum {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
+.week-wrap-note {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+@media (max-width: 560px) {
+  .week-wrap-days {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .week-wrap-day {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) 1fr 1fr;
+    align-items: center;
+    text-align: left;
+    padding: 6px 10px;
+  }
+  .week-wrap-day-name span {
+    display: inline;
+    margin-left: 4px;
+  }
+  .week-wrap-day-val {
+    margin-top: 0;
+    font-size: 13px;
+  }
+  .week-wrap-day-val small {
+    display: inline;
+    margin-left: 4px;
+  }
+  .week-wrap-hint {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .week-wrap-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* =========================================================
+   Oda Geçmişi (Odak & Zamanlayıcı)
+   ========================================================= */
+.room-history-block {
+  margin-top: 4px;
+}
+.room-history-kpis {
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+}
+.room-history-kpis .summary-kpi-val {
+  overflow-wrap: anywhere;
+}
+.room-history-row {
+  align-items: flex-start;
+}
+.room-history-main {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+.room-history-sub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+.room-history-foot {
+  margin-top: 10px;
+}
+.room-history-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--bg-input);
+}
+.room-history-empty .ic {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}

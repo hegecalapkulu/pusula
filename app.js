@@ -371,6 +371,8 @@
       focusStats: {},
       // Ortak seri: başka biriyle aynı odada ders oturumu tamamlanan art arda günler
       roomStreak: { current: 0, best: 0, lastDay: null },
+      // Oda geçmişi: aynı odada başkalarıyla tamamlanan ders oturumları (gün → dakika, oturum, kişiler)
+      roomHistory: { days: {} },
       dailyNotes: {
         [today]: "Yeni planlayıcı sistemimi kurdum. Amacım kendimi saat saat robot gibi sıkmak değil; neyi neden yaptığımı bilerek, ertelediğimde bile farkındalıkla yöneterek sürdürülebilir bir düzen yakalamak."
       },
@@ -545,6 +547,7 @@
       state.trashedGoals = Array.isArray(loaded.trashedGoals) ? loaded.trashedGoals : [];
       state.focusStats = loaded.focusStats || {};
       state.roomStreak = normalizeRoomStreak(loaded.roomStreak);
+      state.roomHistory = normalizeRoomHistory(loaded.roomHistory);
       state.dailyNotes = loaded.dailyNotes || {};
       state.weeklyNotes = loaded.weeklyNotes || {};
       state.savedQuotes = Array.isArray(loaded.savedQuotes) ? loaded.savedQuotes : [];
@@ -899,7 +902,8 @@
     link: '<path d="M10 14a3.5 3.5 0 0 0 5 0l3-3a3.5 3.5 0 0 0-5-5l-1 1M14 10a3.5 3.5 0 0 0-5 0l-3 3a3.5 3.5 0 0 0 5 5l1-1"/>',
     archive: '<rect x="3.75" y="4.25" width="16.5" height="4.5" rx="1"/><path d="M5.25 8.75v10a1 1 0 0 0 1 1h11.5a1 1 0 0 0 1-1v-10M10 12.25h4"/>',
     restore: '<path d="M4.75 12a7.25 7.25 0 1 0 2.2-5.2M4.75 4.75v4h4"/>',
-    quote: '<path d="M9.25 7.25H6a1.25 1.25 0 0 0-1.25 1.25v3.25A1.25 1.25 0 0 0 6 13h2.5v.5a3 3 0 0 1-3 3M19.25 7.25H16a1.25 1.25 0 0 0-1.25 1.25v3.25A1.25 1.25 0 0 0 16 13h2.5v.5a3 3 0 0 1-3 3"/>'
+    quote: '<path d="M9.25 7.25H6a1.25 1.25 0 0 0-1.25 1.25v3.25A1.25 1.25 0 0 0 6 13h2.5v.5a3 3 0 0 1-3 3M19.25 7.25H16a1.25 1.25 0 0 0-1.25 1.25v3.25A1.25 1.25 0 0 0 16 13h2.5v.5a3 3 0 0 1-3 3"/>',
+    users: '<circle cx="9" cy="8.5" r="3.25"/><path d="M3.25 19.25a5.75 5.75 0 0 1 11.5 0M15.5 5.6a3.25 3.25 0 0 1 0 5.8M17.25 14.1a5.75 5.75 0 0 1 3.5 5.15"/>'
   };
 
   // Küçük çizgi ikon (currentColor). Boyut CSS ile (.ic) ayarlanabilir.
@@ -1941,6 +1945,9 @@
 
     renderWeeklySummary(weekMon);
     renderWeeklyDoneChart(weekMon);
+    // Haftayı Bitir penceresi açıksa güncel verilerle yeniden çiz (yalnızca okuma)
+    const wrapModal = document.getElementById("modalWeekWrap");
+    if (wrapModal && !wrapModal.classList.contains("hidden")) renderWeekWrap();
   }
 
   // ---------- Haftalık Özet ----------
@@ -2098,6 +2105,278 @@
         <div class="weekly-summary-list"><h5>En çok odaklanılan hedefler</h5>${goalsHtml}</div>
         <div class="weekly-summary-list"><h5>En çok ertelenenler</h5>${postponedHtml}</div>
       </div>`;
+  }
+
+  // ---------- Haftayı Bitir (salt okunur hafta kapanış özeti) ----------
+  // Tamamen isteğe bağlı: yalnızca kayıtlı verileri okur; hiçbir görevi taşımaz,
+  // tamamlamaz, ertelemez ve state'e yazmaz. Listelerdeki öğeler openInView ile açılır.
+  let weekWrapMonday = null;
+
+  function computeWeekWrap(weekMon) {
+    const days = getWeekDaysISO(weekMon);
+    const weekEnd = days[6];
+    const inWeek = (iso) => typeof iso === "string" && iso >= weekMon && iso <= weekEnd;
+    const base = computeWeeklySummary(weekMon);
+    const tasks = state.tasks || [];
+    const dayTasks = tasks.filter((t) => t.scope === "day" && inWeek(t.date));
+    const poolTasks = tasks.filter((t) => t.scope === "week" && t.weekMonday === weekMon);
+    const goalNames = {};
+    (state.goals || []).forEach((g) => { goalNames[g.id] = g.title; });
+
+    const taskSeries = getTaskDoneSeries(weekEnd, 7);
+    const focusSeries = getFocusSeries(weekEnd, 7);
+    const perDay = days.map((iso, i) => ({
+      iso,
+      done: taskSeries[i].value,
+      planned: taskSeries[i].total,
+      minutes: focusSeries[i].value,
+      sessions: focusSeries[i].sessions
+    }));
+
+    const sortByDay = (a, b) => (a.scope === b.scope ? String(a.date || "").localeCompare(String(b.date || "")) : a.scope === "day" ? -1 : 1);
+    const weekTasks = dayTasks.concat(poolTasks);
+    const unfinished = weekTasks.filter((t) => !t.completed).sort(sortByDay);
+
+    // Bu hafta yapılan ertelemeler (kaydın tarihine göre), görev başına
+    const postponed = [];
+    tasks.forEach((t) => {
+      const n = (t.postponeHistory || []).filter((h) => h && inWeek(h.at)).length;
+      if (n > 0) postponed.push({ task: t, count: n });
+    });
+    postponed.sort((a, b) => b.count - a.count);
+
+    // Tamamlananlar hedefe göre
+    const doneByGoal = new Map();
+    weekTasks.filter((t) => t.completed).sort(sortByDay).forEach((t) => {
+      const gid = t.goalId && goalNames[t.goalId] ? t.goalId : "";
+      if (!doneByGoal.has(gid)) doneByGoal.set(gid, []);
+      doneByGoal.get(gid).push(t);
+    });
+
+    // Hedefler: odak süresi (focusStats.byGoal) ve tamamlanan görev sayısı
+    const goalMap = new Map();
+    const goalEntry = (gid) => {
+      if (!goalMap.has(gid)) goalMap.set(gid, { id: goalNames[gid] ? gid : "", title: goalNames[gid] || "Silinmiş hedef", minutes: 0, done: 0 });
+      return goalMap.get(gid);
+    };
+    const stats = state.focusStats || {};
+    days.forEach((d) => {
+      const st = stats[d];
+      if (!st || typeof st !== "object" || !st.byGoal || typeof st.byGoal !== "object") return;
+      Object.keys(st.byGoal).forEach((gid) => {
+        const v = Number(st.byGoal[gid]) || 0;
+        if (v > 0) goalEntry(gid).minutes += v;
+      });
+    });
+    doneByGoal.forEach((list, gid) => { if (gid) goalEntry(gid).done += list.length; });
+    const goals = Array.from(goalMap.values()).sort((a, b) => b.minutes - a.minutes || b.done - a.done);
+
+    // Ortak oda (Oda Geçmişi)
+    const rh = readRoomHistory();
+    const room = summarizeRoomHistory(rh, weekMon, weekEnd);
+    const roomDays = room.isos.map((iso) => ({ iso, minutes: rh.days[iso].minutes, names: roomDayNames(rh.days[iso]) }));
+
+    const note = (state.weeklyNotes && typeof state.weeklyNotes[weekMon] === "string") ? state.weeklyNotes[weekMon].trim() : "";
+
+    return {
+      base, days, perDay,
+      dayPlanned: dayTasks.length, dayDone: dayTasks.filter((t) => t.completed).length,
+      poolPlanned: poolTasks.length, poolDone: poolTasks.filter((t) => t.completed).length,
+      unfinished, postponed, doneByGoal, goals, room, roomDays, note
+    };
+  }
+
+  function renderWeekWrap() {
+    const content = document.getElementById("weekWrapContent");
+    if (!content || !weekWrapMonday) return;
+    const weekMon = weekWrapMonday;
+    const today = getTodayISO();
+    const thisMon = getWeekMondayISO(today);
+    const rangeEl = document.getElementById("weekWrapRange");
+    if (rangeEl) {
+      const rel = weekMon === thisMon ? " · bu hafta" : weekMon === addDaysISO(thisMon, -7) ? " · geçen hafta" : "";
+      rangeEl.textContent = `${getISOWeekNumber(weekMon)}. hafta · ${formatWeekRangeTR(weekMon)}${rel}`;
+    }
+    const w = computeWeekWrap(weekMon);
+    const s = w.base;
+    const planned = w.dayPlanned + w.poolPlanned;
+    const done = w.dayDone + w.poolDone;
+    const hasAny = planned > 0 || s.minutes > 0 || s.routineDue > 0 || s.postponedTotal > 0 || w.room.dayCount > 0 || w.note;
+
+    if (!hasAny) {
+      content.innerHTML = `<div class="empty-state">${s.isFuture
+        ? "Bu hafta henüz başlamadı. Görev ekledikçe ve çalıştıkça özet burada birikecek."
+        : "Bu hafta için kayıtlı görev, odak oturumu, rutin ya da not yok."}</div>`;
+      return;
+    }
+
+    const dayLabel = (iso) => {
+      const dt = parseISODate(iso);
+      return `${TR_DAYS_SHORT[dt.getDay()]} ${dt.getDate()} ${TR_MONTHS[dt.getMonth()].slice(0, 3)}`;
+    };
+    const taskDayText = (t) => (t.scope === "week" ? "Haftalık havuz" : t.date ? dayLabel(t.date) : "Tarihsiz");
+    const goalText = (t) => (t.goalId ? (getGoalById(t.goalId) || {}).title || "" : "");
+    const row = (nav, title, sub, right) => `
+      <div class="weekly-summary-row week-wrap-row${nav ? " is-navlink nav-row" : ""}"${nav ? ` role="link" tabindex="0" ${navAttrsHtml(nav)} title="${escapeHtml(nav.label)}"` : ""}>
+        <div class="week-wrap-row-main">
+          <div class="week-wrap-row-title">${title}</div>
+          ${sub ? `<div class="week-wrap-row-sub">${sub}</div>` : ""}
+        </div>
+        ${right ? `<span>${right}</span>` : ""}
+      </div>`;
+    const section = (iconName, title, inner, extraCls = "") =>
+      `<section class="week-wrap-section${extraCls}"><h5 class="week-wrap-h">${icon(iconName, 15)}${title}</h5>${inner}</section>`;
+    const note = (txt) => `<div class="weekly-summary-note">${txt}</div>`;
+
+    // 1) Başlık rakamları
+    const kpi = (label, val, hint) => `
+      <div class="summary-kpi-card">
+        <div class="summary-kpi-label">${label}</div>
+        <div class="summary-kpi-val">${val}</div>
+        ${hint ? `<div class="weekly-summary-hint">${hint}</div>` : ""}
+      </div>`;
+    const taskHint = planned > 0
+      ? `Güne atanmış ${w.dayDone}/${w.dayPlanned} · Haftalık havuz ${w.poolDone}/${w.poolPlanned}`
+      : "Bu haftaya görev atanmamış";
+    const kpis = [
+      kpi(`${icon("list", 15)}Görevler`, planned > 0 ? `${done} / ${planned}` : "—", taskHint),
+      kpi(`${icon("timer", 15)}Odak`, s.minutes > 0 ? formatMinutesTR(s.minutes) : "—", s.minutes > 0 ? `${s.sessions} oturum` : "Kayıtlı oturum yok"),
+      kpi(`${icon("repeat", 15)}Rutin Uyumu`, s.routineDue > 0 ? `%${Math.round((s.routineDone / s.routineDue) * 100)}` : "—",
+        s.routineDue > 0 ? `${s.routineDone} / ${s.routineDue} planlı gün` : "Planlı rutin günü yok"),
+      kpi(`${icon("hourglass", 15)}Erteleme`, `${s.postponedTotal} kez`, s.postponedTotal > 0 ? `${w.postponed.length} görevde` : "Bu hafta erteleme yok")
+    ].join("");
+
+    // 2) Gün gün şerit
+    const strip = w.perDay.map((d) => {
+      const dt = parseISODate(d.iso);
+      const cls = `week-wrap-day${d.iso === today ? " is-today" : ""}${d.planned === 0 && d.minutes === 0 ? " is-empty" : ""}`;
+      return `<div class="${cls}">
+        <div class="week-wrap-day-name">${TR_DAYS_SHORT[dt.getDay()]} <span>${dt.getDate()} ${TR_MONTHS[dt.getMonth()].slice(0, 3)}</span></div>
+        <div class="week-wrap-day-val">${d.planned > 0 ? `${d.done}/${d.planned}` : "—"}<small>görev</small></div>
+        <div class="week-wrap-day-val">${d.minutes > 0 ? `${d.minutes} dk` : "—"}<small>odak</small></div>
+      </div>`;
+    }).join("");
+    const stripNote = w.poolPlanned > 0
+      ? note(`Haftalık havuzdaki ${w.poolPlanned} görev bir güne bağlı olmadığı için günlere dağıtılmadı.`)
+      : "";
+
+    // 3) Listeler
+    const unfinishedHtml = w.unfinished.length
+      ? w.unfinished.map((t) => {
+          const g = goalText(t);
+          return row(taskNavAttrs(t), escapeHtml(t.title), `${escapeHtml(taskDayText(t))}${g ? ` · ${escapeHtml(g)}` : ""}`, "");
+        }).join("")
+      : note(planned > 0 ? "Bu haftanın bütün görevleri tamamlanmış." : "Bu haftaya görev atanmamış.");
+
+    const postponedHtml = w.postponed.length
+      ? w.postponed.map((p) => {
+          const t = p.task;
+          const total = Number(t.postponeCount) || (t.postponeHistory || []).length;
+          const sub = `${t.completed ? "Tamamlandı" : "Şu an: " + taskDayText(t)}${total > p.count ? ` · toplam ${total} kez` : ""}`;
+          return row(taskNavAttrs(t), escapeHtml(t.title), escapeHtml(sub), `${p.count}x`);
+        }).join("")
+      : note("Bu hafta erteleme yapılmamış.");
+
+    let doneHtml = "";
+    if (w.doneByGoal.size) {
+      const groups = Array.from(w.doneByGoal.entries()).sort((a, b) => (a[0] ? 0 : 1) - (b[0] ? 0 : 1) || b[1].length - a[1].length);
+      doneHtml = groups.map(([gid, list]) => {
+        const head = gid
+          ? `<div class="week-wrap-group-head is-navlink" role="link" tabindex="0" data-nav-view="goals" data-nav-focus="goal:${escapeHtml(gid)}" title="Hedef Pusulası'nda aç">${icon("target", 13)}<span>${escapeHtml(getGoalById(gid).title)}</span><em>${list.length}</em></div>`
+          : `<div class="week-wrap-group-head">${icon("check", 13)}<span>Hedefe bağlı olmayanlar</span><em>${list.length}</em></div>`;
+        return `<div class="week-wrap-group">${head}${list.map((t) => row(taskNavAttrs(t), escapeHtml(t.title), escapeHtml(taskDayText(t)), "")).join("")}</div>`;
+      }).join("");
+    } else {
+      doneHtml = note(planned > 0 ? "Bu hafta henüz tamamlanan görev yok." : "Bu haftaya görev atanmamış.");
+    }
+
+    // 4) Hedefler
+    let goalsHtml = w.goals.length
+      ? w.goals.map((g) => {
+          const parts = [];
+          if (g.minutes > 0) parts.push(formatMinutesTR(g.minutes));
+          if (g.done > 0) parts.push(`${g.done} görev`);
+          const nav = g.id ? { view: "goals", focus: `goal:${g.id}`, label: "Hedef Pusulası'nda aç" } : null;
+          return row(nav, escapeHtml(g.title), "", parts.join(" · "));
+        }).join("")
+      : note(s.minutes > 0 ? "Bu haftanın odak oturumları ve tamamlanan görevleri bir hedefe bağlı değil." : "Bu hafta hedefe bağlı odak süresi ya da tamamlanan görev yok.");
+    if (w.goals.length && s.untrackedGoalMinutes > 0) {
+      goalsHtml += note(`Hedef dağılımı kaydı başlamadan önceki ${formatMinutesTR(s.untrackedGoalMinutes)} odak dahil değil.`);
+    }
+
+    // 5) Ortak oda (yalnızca kayıt varsa)
+    let roomHtml = "";
+    if (w.room.dayCount > 0) {
+      const people = w.room.people
+        .slice()
+        .sort((a, b) => b.minutes - a.minutes)
+        .map((p) => `${escapeHtml(p.name)} (${formatMinutesTR(p.minutes)})`)
+        .join(", ");
+      roomHtml = section("users", "Birlikte Çalışma",
+        `<div class="week-wrap-room-sum">${w.room.dayCount} gün birlikte · toplam ${formatMinutesTR(w.room.minutes)}${people ? ` · ${people}` : ""}</div>` +
+        w.roomDays.map((d) => row(null, escapeHtml(dayLabel(d.iso)), d.names.length ? d.names.map(escapeHtml).join(", ") : "", formatMinutesTR(d.minutes))).join(""));
+    }
+
+    // 6) Haftalık not (salt okunur)
+    const noteHtml = w.note
+      ? section("note", "Haftalık Odak Notu", `<div class="week-wrap-note">${escapeHtml(w.note)}</div>`)
+      : "";
+
+    content.innerHTML = `
+      <div class="weekly-summary-kpis week-wrap-kpis">${kpis}</div>
+      ${section("calendar", "Gün Gün", `<div class="week-wrap-days">${strip}</div>${stripNote}`)}
+      <div class="week-wrap-cols">
+        ${section("flag", `Bitmeyenler${w.unfinished.length ? ` <em>${w.unfinished.length}</em>` : ""}`, unfinishedHtml)}
+        ${section("hourglass", `Ertelenenler${w.postponed.length ? ` <em>${w.postponed.length}</em>` : ""}`, postponedHtml)}
+      </div>
+      <div class="week-wrap-cols">
+        ${section("check", `Tamamlananlar${done ? ` <em>${done}</em>` : ""}`, doneHtml)}
+        ${section("target", "Hedefler", goalsHtml)}
+      </div>
+      ${roomHtml}
+      ${noteHtml}`;
+    decorateFigures(content);
+  }
+
+  function openWeekWrap(weekMon) {
+    weekWrapMonday = getWeekMondayISO(weekMon || uiState.selectedWeekMondayISO || getTodayISO());
+    renderWeekWrap();
+    openModal("modalWeekWrap");
+    const card = document.querySelector("#modalWeekWrap .modal-card");
+    if (card) card.scrollTop = 0;
+    const closeBtn = document.querySelector('#modalWeekWrap [data-close-modal="modalWeekWrap"]');
+    if (closeBtn) {
+      try { closeBtn.focus({ preventScroll: true }); } catch (_) {}
+    }
+  }
+
+  function stepWeekWrap(delta) {
+    if (!weekWrapMonday) return;
+    weekWrapMonday = addDaysISO(weekWrapMonday, delta * 7);
+    renderWeekWrap();
+    const card = document.querySelector("#modalWeekWrap .modal-card");
+    if (card) card.scrollTop = 0;
+  }
+
+  function bindWeekWrap() {
+    const btn = document.getElementById("btnOpenWeekWrap");
+    const modal = document.getElementById("modalWeekWrap");
+    if (!btn || !modal) return;
+    btn.addEventListener("click", () => openWeekWrap(uiState.selectedWeekMondayISO));
+    document.getElementById("btnWeekWrapPrev").addEventListener("click", () => stepWeekWrap(-1));
+    document.getElementById("btnWeekWrapNext").addEventListener("click", () => stepWeekWrap(1));
+    // Listelerden bir öğe açılınca önce pencere kapanır; açma işini belgedeki
+    // ortak [data-nav-view] dinleyicisi (openInView) yapar.
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) {
+        closeModal("modalWeekWrap");
+        return;
+      }
+      if (e.target.closest("[data-nav-view]")) closeModal("modalWeekWrap");
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !modal.classList.contains("hidden")) closeModal("modalWeekWrap");
+    });
   }
 
   // =========================================================
@@ -3037,7 +3316,10 @@
           }
         }
       }
-      const streakGrew = isInRoomWithOthers() ? recordRoomStudyDay(today) : false;
+      const withOthers = isInRoomWithOthers();
+      const streakGrew = withOthers ? recordRoomStudyDay(today) : false;
+      // Oda geçmişi: Ortak Seri ile aynı koşulda (odada başka biri bağlıyken) yazılır
+      if (withOthers) recordRoomHistorySession(today, completedMinutes);
       saveData();
       showToast(`🎉 Harika! ${completedMinutes} dakikalık odak oturumu tamamlandı. Kısa mola zamanı!`);
       if (streakGrew) {
@@ -4712,6 +4994,221 @@
     return roomState.status === "connected";
   }
 
+  // ---------- Oda Geçmişi ----------
+  // Bu cihazda tutulur (Ortak Seri gibi). Yalnızca ders oturumları sayılır; oturumun
+  // dakikası, tamamlandığı anda odada bağlı olan diğer herkese yazılır.
+  // state.roomHistory = { days: { "YYYY-MM-DD": { minutes, sessions, people: { "<anahtar>": { name, minutes } } } } }
+  // İsimler eşlerden gelir (güvenilmez): temizlenir, kısaltılır, yalnızca escapeHtml ile basılır.
+  const ROOM_HISTORY_MAX_DAYS = 365;
+  const ROOM_HISTORY_MAX_PEOPLE_PER_DAY = 16;
+  const ROOM_HISTORY_NAME_MAX = 20;
+  const ROOM_HISTORY_DEDUPE_MS = 20000; // aynı oturumun iki kez tamamlanmasına karşı
+  const ROOM_HISTORY_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+  let roomHistoryLastRecordAt = 0;
+
+  function cleanRoomPersonName(name) {
+    return String(name == null ? "" : name)
+      .replace(/[\u0000-\u001f\u007f]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, ROOM_HISTORY_NAME_MAX);
+  }
+
+  function roomPersonKey(name) {
+    return cleanRoomPersonName(name).toLocaleLowerCase("tr-TR");
+  }
+
+  function normalizeRoomHistory(h) {
+    const src = h && typeof h === "object" && h.days && typeof h.days === "object" ? h.days : {};
+    const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.round(Number(v)) : 0);
+    const days = {};
+    Object.keys(src)
+      .filter((k) => ROOM_HISTORY_DAY_RE.test(k))
+      .sort()
+      .slice(-ROOM_HISTORY_MAX_DAYS)
+      .forEach((iso) => {
+        const d = src[iso];
+        if (!d || typeof d !== "object") return;
+        const people = Object.create(null);
+        let count = 0;
+        const raw = d.people && typeof d.people === "object" ? d.people : {};
+        Object.keys(raw).forEach((k) => {
+          const e = raw[k];
+          if (!e || typeof e !== "object") return;
+          const name = cleanRoomPersonName(e.name);
+          const key = roomPersonKey(name);
+          if (!key) return;
+          if (!people[key]) {
+            if (count >= ROOM_HISTORY_MAX_PEOPLE_PER_DAY) return;
+            count++;
+            people[key] = { name, minutes: 0 };
+          }
+          people[key].minutes += num(e.minutes);
+        });
+        const minutes = num(d.minutes);
+        if (!minutes && !count) return;
+        days[iso] = { minutes, sessions: num(d.sessions), people };
+      });
+    return { days };
+  }
+
+  // Okuma: state'e dokunmadan temizlenmiş kopya döner
+  function readRoomHistory() {
+    return normalizeRoomHistory(state.roomHistory);
+  }
+
+  // Şu an odada bağlı olan diğer kişilerin görünen adları (kendin hariç)
+  function getRoomCompanionsNow() {
+    if (!roomState.roomCode) return [];
+    const me = getRoomClientId();
+    const out = [];
+    if (roomState.isHost) {
+      roomState.guests.forEach((e, id) => {
+        if (e && e.status === "connected" && id !== me) out.push(e.name);
+      });
+    } else if (roomState.status === "connected") {
+      (roomState.participants || []).forEach((p) => {
+        if (p && p.id !== me && p.status === "connected") out.push(p.name);
+      });
+      if (!out.length && roomState.hostName) out.push(roomState.hostName);
+    }
+    return out;
+  }
+
+  function recordRoomHistorySession(today, minutes) {
+    const names = getRoomCompanionsNow();
+    const m = Math.max(0, Math.round(Number(minutes) || 0));
+    if (!names.length || !m || !ROOM_HISTORY_DAY_RE.test(today)) return false;
+    const now = Date.now();
+    if (now - roomHistoryLastRecordAt < ROOM_HISTORY_DEDUPE_MS) return false;
+    roomHistoryLastRecordAt = now;
+
+    const h = normalizeRoomHistory(state.roomHistory);
+    const day = h.days[today] || (h.days[today] = { minutes: 0, sessions: 0, people: Object.create(null) });
+    day.minutes += m;
+    day.sessions += 1;
+    const seen = new Set();
+    names.forEach((n) => {
+      const name = cleanRoomPersonName(n);
+      const key = roomPersonKey(name);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      if (!day.people[key]) {
+        if (Object.keys(day.people).length >= ROOM_HISTORY_MAX_PEOPLE_PER_DAY) return;
+        day.people[key] = { name, minutes: 0 };
+      }
+      day.people[key].name = name; // en son görünen yazım
+      day.people[key].minutes += m;
+    });
+    const keys = Object.keys(h.days).sort();
+    while (keys.length > ROOM_HISTORY_MAX_DAYS) delete h.days[keys.shift()];
+    state.roomHistory = h;
+    return true;
+  }
+
+  // Kişi bazında toplamlar; from/to verilirse yalnızca o tarih aralığı
+  function summarizeRoomHistory(h, from = "", to = "") {
+    const isos = Object.keys(h.days)
+      .filter((iso) => (!from || iso >= from) && (!to || iso <= to))
+      .sort();
+    const people = new Map();
+    let minutes = 0;
+    let sessions = 0;
+    isos.forEach((iso) => {
+      const d = h.days[iso];
+      minutes += d.minutes;
+      sessions += d.sessions;
+      Object.keys(d.people).forEach((key) => {
+        const e = d.people[key];
+        const p = people.get(key) || { key, name: e.name, days: 0, minutes: 0, lastDay: "" };
+        p.name = e.name;
+        p.days += 1;
+        p.minutes += e.minutes;
+        p.lastDay = iso;
+        people.set(key, p);
+      });
+    });
+    const list = Array.from(people.values()).sort(
+      (a, b) => (b.lastDay > a.lastDay ? 1 : b.lastDay < a.lastDay ? -1 : 0) || b.minutes - a.minutes
+    );
+    const top = list.slice().sort((a, b) => b.minutes - a.minutes || b.days - a.days || (b.lastDay > a.lastDay ? 1 : -1))[0] || null;
+    return { isos, dayCount: isos.length, minutes, sessions, people: list, top };
+  }
+
+  function roomDayNames(day) {
+    return Object.keys(day.people)
+      .map((k) => day.people[k])
+      .sort((a, b) => b.minutes - a.minutes)
+      .map((p) => p.name);
+  }
+
+  function formatRoomDayLabel(iso) {
+    const dt = parseISODate(iso);
+    const today = getTodayISO();
+    const rel = iso === today ? "Bugün · " : iso === addDaysISO(today, -1) ? "Dün · " : "";
+    return `${rel}${TR_DAYS_SHORT[dt.getDay()]} ${dt.getDate()} ${TR_MONTHS[dt.getMonth()]}`;
+  }
+
+  function renderRoomHistory() {
+    const card = document.getElementById("roomHistoryCard");
+    const body = document.getElementById("roomHistoryBody");
+    const totalEl = document.getElementById("roomHistoryTotal");
+    if (!card || !body) return;
+    const s = summarizeRoomHistory(readRoomHistory());
+    const has = s.dayCount > 0;
+    const show = has || !!roomState.roomCode;
+    card.classList.toggle("hidden", !show);
+    if (!show) return;
+    if (totalEl) totalEl.textContent = has ? `${s.dayCount} gün · ${formatMinutesTR(s.minutes)}` : "";
+    if (!has) {
+      body.innerHTML = `<div class="room-history-empty">${icon("users", 16)}<span>Henüz ortak oturum kaydı yok. Odada biriyle bir ders oturumu tamamladığında kiminle, kaç gün ve kaç dakika çalıştığınız burada birikecek.</span></div>`;
+      return;
+    }
+    const h = readRoomHistory();
+    const kpi = (label, val, hint) => `
+      <div class="summary-kpi-card">
+        <div class="summary-kpi-label">${label}</div>
+        <div class="summary-kpi-val">${val}</div>
+        ${hint ? `<div class="weekly-summary-hint">${hint}</div>` : ""}
+      </div>`;
+    const kpis = [
+      kpi(`${icon("calendar", 15)}Ortak Gün`, `${s.dayCount} gün`, `${s.sessions} ortak oturum`),
+      kpi(`${icon("timer", 15)}Birlikte Süre`, formatMinutesTR(s.minutes), "yalnızca ders oturumları"),
+      kpi(`${icon("users", 15)}En Çok Birlikte`, s.top ? escapeHtml(s.top.name) : "—",
+        s.top ? `${s.top.days} gün · ${formatMinutesTR(s.top.minutes)}` : "")
+    ].join("");
+    const MAX_PEOPLE = 12;
+    const peopleRows = s.people.slice(0, MAX_PEOPLE).map((p) => `
+      <div class="weekly-summary-row room-history-row">
+        <div class="room-history-main">
+          <div class="room-history-name">${escapeHtml(p.name)}</div>
+          <div class="room-history-sub">Son: ${escapeHtml(formatRoomDayLabel(p.lastDay))}</div>
+        </div>
+        <span>${p.days} gün · ${formatMinutesTR(p.minutes)}</span>
+      </div>`).join("") +
+      (s.people.length > MAX_PEOPLE ? `<div class="weekly-summary-note">+${s.people.length - MAX_PEOPLE} kişi daha</div>` : "");
+    const recentRows = s.isos.slice(-7).reverse().map((iso) => {
+      const d = h.days[iso];
+      const names = roomDayNames(d);
+      return `
+      <div class="weekly-summary-row room-history-row">
+        <div class="room-history-main">
+          <div class="room-history-name">${escapeHtml(formatRoomDayLabel(iso))}</div>
+          <div class="room-history-sub">${names.length ? names.map(escapeHtml).join(", ") : "—"}</div>
+        </div>
+        <span>${formatMinutesTR(d.minutes)}</span>
+      </div>`;
+    }).join("");
+    body.innerHTML = `
+      <div class="weekly-summary-kpis room-history-kpis">${kpis}</div>
+      <div class="weekly-summary-lists">
+        <div class="weekly-summary-list"><h5>Kiminle çalıştın</h5>${peopleRows}</div>
+        <div class="weekly-summary-list"><h5>Son ortak günler</h5>${recentRows}</div>
+      </div>
+      <div class="weekly-summary-note room-history-foot">Bu cihazdaki kayıtlardan. Odada en az bir kişi bağlıyken tamamlanan ders oturumları sayılır; molalar sayılmaz.</div>`;
+    decorateFigures(body);
+  }
+
   function makeRoomMessage(type, payload = {}) {
     return Object.assign({
       v: ROOM_PROTOCOL_VERSION,
@@ -5769,6 +6266,7 @@
     if (box) box.classList.toggle("hidden", !inRoom);
     if (chatPanel) chatPanel.classList.toggle("hidden", !inRoom);
     renderRoomStreakStat();
+    renderRoomHistory();
 
     if (!inRoom) {
       renderRoomChatUnread();
@@ -6027,6 +6525,9 @@
       uiState.selectedWeekMondayISO = getWeekMondayISO(getTodayISO());
       renderAll();
     });
+
+    // Haftayı Bitir (salt okunur hafta özeti)
+    bindWeekWrap();
 
     // Takvim (Gün / Ay / Yıl) Kontrolleri
     document.querySelectorAll("[data-cal-mode]").forEach((btn) => {
@@ -6539,6 +7040,7 @@
           const parsed = JSON.parse(reader.result);
           if (parsed && Array.isArray(parsed.tasks)) {
             state = parsed;
+            state.roomHistory = normalizeRoomHistory(parsed.roomHistory);
             saveData();
             renderAll();
             showToast("📂 Yedek başarıyla yüklendi!");
